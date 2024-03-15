@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <assert.h>
 #include <ctype.h>
 #include <dirent.h>
@@ -756,13 +757,6 @@ _item_get_duration_wav(MoeDanceItem *m, const char map[], size_t len)
 }
 
 
-static int
-_sort_dir_cb(const struct dirent **a, const struct dirent **b)
-{
-	return strcasecmp((*a)->d_name, (*b)->d_name);
-}
-
-
 static void
 _load_files(Str *str, ArrayPtr *file_arr, const char path[], int max_depth)
 {
@@ -778,7 +772,7 @@ _load_files(Str *str, ArrayPtr *file_arr, const char path[], int max_depth)
 	if (file_arr->len == INT_MAX - 1)
 		return;
 
-	num = scandir(path, &list, NULL, _sort_dir_cb);
+	num = scandir(path, &list, NULL, versionsort);
 	if (num < 0) {
 		ret = -errno;
 		log_err(ret, "_load_files: scandir: %s", path);
