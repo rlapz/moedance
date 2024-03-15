@@ -2,6 +2,8 @@
 
 ## MoeDance - A pretty simple music player
 
+![](ss.png)
+
 ### KISS: Keep it simple and suckless:
 1. Sorted by `directory/filename.ext` in mind.
 2. Configuration only occurs in compile time by editing `config.h` file.
