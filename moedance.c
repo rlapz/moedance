@@ -101,7 +101,7 @@ _set_signal_handler(MoeDance *m)
 		return ret;
 	}
 
-	const int sigfd = signalfd(-1, &sigmask, 0);
+	const int sigfd = signalfd(-1, &sigmask, SFD_NONBLOCK);
 	if (sigfd < 0) {
 		ret = -errno;
 		log_err(ret, "_set_signal_handler: signalfd");
