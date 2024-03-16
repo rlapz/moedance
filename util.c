@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <ctype.h>
 #include <inttypes.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -56,6 +57,51 @@ cstr_time_fmt(char dest[], size_t size, int64_t secs)
 		cstr_copy(dest, "??:??:??");
 
 	return dest;
+}
+
+/*
+ * Copied from: https://git.musl-libc.org/cgit/musl/tree/src/string/strverscmp.c (MIT license)
+ */
+int
+cstr_cmp_vers(const char a[], const char b[])
+{
+	const unsigned char *l = (const void *)a;
+	const unsigned char *r = (const void *)b;
+	size_t i = 0, dp = 0, j;
+	int z = 1;
+
+	/* Find maximal matching prefix and track its maximal digit
+	 * suffix and whether those digits are all zeros. */
+	for (; l[i] == r[i]; i++) {
+		int c = l[i];
+		if (!c)
+			return 0;
+
+		if (!isdigit(c)) {
+			dp = i + 1;
+			z = 1;
+		} else if (c!='0') {
+			z = 0;
+		}
+	}
+
+	if (((l[dp] - '1') < 9) && ((r[dp] -'1') < 9)) {
+		/* If we're looking at non-degenerate digit sequences starting
+		 * with nonzero digits, longest digit string is greater. */
+		for (j = i; isdigit(l[j]); j++) {
+			if (!isdigit(r[j]))
+				return 1;
+		}
+
+		if (isdigit(r[j]))
+			return -1;
+	} else if (z && (dp < i) && (isdigit(l[i]) || isdigit(r[i]))) {
+		/* Otherwise, if common prefix of digit sequence is
+		 * all zeros, digits order less than non-digits. */
+		return (unsigned char)(l[i] - '0') - (unsigned char)(r[i] - '0');
+	}
+
+	return l[i] - r[i];
 }
 
 

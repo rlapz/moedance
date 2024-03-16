@@ -19,6 +19,7 @@
 void  cstr_copy(char dest[], const char src[]);
 //char *cstr_copy_s(char dest[], size_t size, const char src[]);
 char *cstr_time_fmt(char dest[], size_t size, int64_t secs);
+int   cstr_cmp_vers(const char a[], const char b[]);
 
 
 /*
