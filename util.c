@@ -427,8 +427,11 @@ out0:
 void
 log_file_init(const char path[])
 {
-	if (_log_file_out == NULL)
+	if (_log_file_out == NULL) {
 		_log_file_out = fopen(path, "a+");
+		if (_log_file_out == NULL)
+			_log_file_out = fopen("./moedance.log", "a+");
+	}
 
 	if (_log_file_out != NULL)
 		log_info("starting...");
