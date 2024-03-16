@@ -141,7 +141,7 @@ _event_loop(MoeDance *m)
 		}
 
 		if (ret == 0) {
-			// TODO: refresh durations
+			_tui_draw_all(m);
 			continue;
 		}
 
@@ -312,26 +312,6 @@ _event_handle_signal(MoeDance *m, int fd)
 
 	switch (siginfo.ssi_signo) {
 	case SIGWINCH:
-		tui_resize(&m->tui);
-
-		const int end = tui_body_get_items_len(&m->tui);
-		if (end <= 0)
-			return;
-
-		int diff = m->item_cursor - end;
-		const int sum = m->item_top + end;
-		if (diff >= 0) {
-			m->item_cursor = (end - 1);
-			m->item_top += (diff + 1);
-		} else if ((sum >= m->items_len - 1) && (m->item_top > 0)) {
-			diff = sum - (m->items_len - 1);
-			if (m->item_cursor + diff - 1 >= 0) {
-				m->item_cursor += diff - 1;
-				m->item_top -= diff - 1;
-			}
-		}
-
-		tui_clear();
 		_tui_draw_all(m);
 		break;
 	case SIGHUP:
@@ -574,6 +554,26 @@ _kbd_handle_key_prev(MoeDance *m)
 static void
 _tui_draw_all(MoeDance *m)
 {
+	tui_resize(&m->tui);
+
+	const int end = tui_body_get_items_len(&m->tui);
+	if (end <= 0)
+		return;
+
+	int diff = m->item_cursor - end;
+	const int sum = m->item_top + end;
+	if (diff >= 0) {
+		m->item_cursor = (end - 1);
+		m->item_top += (diff + 1);
+	} else if ((sum >= m->items_len - 1) && (m->item_top > 0)) {
+		diff = sum - (m->items_len - 1);
+		if (m->item_cursor + diff - 1 >= 0) {
+			m->item_cursor += diff - 1;
+			m->item_top -= diff - 1;
+		}
+	}
+
+	tui_clear();
 	_tui_draw_header(m);
 	_tui_draw_body(m);
 	_tui_draw_footer(m);
