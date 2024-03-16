@@ -36,5 +36,5 @@
 
 
 ### License:
-Public Domain
+MIT
 
