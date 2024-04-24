@@ -4,9 +4,7 @@
 
 #include <stdint.h>
 
-#include "miniaudio.h"
 #include "util.h"
-#include "tui.h"
 
 
 enum {
@@ -17,11 +15,15 @@ enum {
 };
 
 typedef struct {
-	int sound_init;
+	const char *name;
+	int64_t     duration;
+	const char *file_ext;
+	char        file_path[1];
+} PlayerItem;
 
-	int       state;
-	ma_engine engine;
-	ma_sound  sound;
+typedef struct {
+	int sound_init;
+	int state;
 } Player;
 
 int  player_init(Player *p);

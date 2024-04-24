@@ -4,34 +4,64 @@
 
 #include <termios.h>
 #include <unistd.h>
-#include <time.h>
+#include <stdint.h>
 
-#include <sys/ioctl.h>
-
+#include "player.h"
 #include "util.h"
+#include "config.h"
 
 
 typedef struct {
-	int            width;
-	int            height;
-	int            header_pos;
-	int            body_pos;
-	int            footer_pos;
-	Str            str;
-	char           str_buffer[4096];
-	struct termios term_orig;
+	int        is_selected;
+	int        now_playing;
+	PlayerItem item;
+} TuiPlaylistItem;
+
+typedef struct {
+	int               state;
+	int               top;
+	int               curr;
+	int               active;
+	int64_t           duration;	/* min duration */
+	TuiPlaylistItem **items;
+	int               len;
+} TuiPlaylist;
+
+typedef struct termios TermIOS;
+
+typedef struct {
+	int          width;
+	int          height;
+	int          header_pos;
+	int          body_pos;
+	int          footer_pos;
+	const char  *dir_name;
+	TuiPlaylist  playlist;
+	Str          str_buffer;
+	TermIOS      termios_orig;
 } Tui;
 
-int  tui_init(Tui *t);
+
+int  tui_init(Tui *t, const char dir_name[]);
 void tui_deinit(Tui *t);
-int  tui_resize(Tui *t);
-void tui_clear(void);
+void tui_draw(Tui *t);
+
 void tui_show_dialog(Tui *t, const char message[]);
 
-void tui_header_set(Tui *t, const char dir_name[], int curr, int total);
-void tui_body_set_item(Tui *t, const char name[], int64_t duration, int is_selected, int now_playing, int pos);
-int  tui_body_get_items_len(const Tui *t);
-void tui_footer_set(Tui *t, char ctrl, int num, int64_t dur_curr, int64_t dur_total, const char name[]);
+void tui_set_playlist(Tui *t, TuiPlaylistItem *items[], int len);
+void tui_set_duration(Tui *t, int64_t duration);
+
+void tui_playlist_cursor_up(Tui *t);
+void tui_playlist_cursor_down(Tui *t);
+void tui_playlist_page_up(Tui *t);
+void tui_playlist_page_down(Tui *t);
+void tui_playlist_top(Tui *t);
+void tui_playlist_bottom(Tui *t);
+int  tui_playlist_play(Tui *t);
+int  tui_playlist_pause(Tui *t);
+int  tui_playlist_stop(Tui *t);
+int  tui_playlist_next(Tui *t);
+int  tui_playlist_prev(Tui *t);
 
 
 #endif

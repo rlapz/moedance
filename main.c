@@ -10,12 +10,12 @@ _load_default_path(char buffer[], size_t size)
 {
 	const char *const env = getenv("HOME");
 	if (env == NULL) {
-		log_err(0, "_load_default_path: invalid \"$HOME\" env variable");
+		log_err(0, "main: _load_default_path: invalid \"$HOME\" env variable");
 		exit(1);
 	}
 
 	if (snprintf(buffer, size, "%s/Music", env) == 0) {
-		log_err(errno, "_load_default_path: snprintf");
+		log_err(errno, "main: _load_default_path: snprintf");
 		exit(1);
 	}
 

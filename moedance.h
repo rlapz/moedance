@@ -17,28 +17,15 @@ enum {
 };
 
 typedef struct {
-	int         is_selected;
-	int         now_playing;
-	int64_t     duration_min;
-	int64_t     duration_max;
-	const char *name;
-	char        path[];
-} MoeDanceItem;
-
-typedef struct {
-	int         flags;
-	const char *root_dir;
-
-	int            item_top;
-	int            item_active;
-	int            item_cursor;
-	int            items_len;
-	MoeDanceItem **items;
-
-	Tui           tui;
-	Player        player;
-	struct pollfd poll_fds[__MOEDANCE_FD_SIZE];
+	int               flags;
+	const char       *root_dir;
+	TuiPlaylistItem **playlist_items;
+	int               playlist_items_len;
+	Tui               tui;
+	Player            player;
+	struct pollfd     poll_fds[__MOEDANCE_FD_SIZE];
 } MoeDance;
+
 
 void moedance_init(MoeDance *m, const char root_dir[]);
 void moedance_deinit(MoeDance *m);

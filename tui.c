@@ -6,40 +6,393 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
-#include <poll.h>
 
 #include <sys/ioctl.h>
 
-#include "util.h"
 #include "tui.h"
+#include "util.h"
 #include "config.h"
 
 
-static int  _set_raw_mode(Tui *t);
+static const char _player_state_chr[] = {
+	[PLAYER_STATE_STOPPED] = '#',
+	[PLAYER_STATE_PLAYING] = '>',
+	[PLAYER_STATE_PAUSED]  = '^',
+	[PLAYER_STATE_UNKNOWN] = '?',
+};
+
+
+static void _clear(void);
+static void _resize(Tui *t);
+static int  _raw_mode(Tui *t);
+static void _set_playlist(Tui *t, const char name[], int64_t dur, int is_sel, int now_pl, int pos);
+static void _set_header(Tui *t);
+static void _set_body(Tui *t);
+static void _set_footer(Tui *t);
+static int  _get_playlist_relative_len(const Tui *t);
+static void _playlist_cursor(Tui *t, int step);
+static void _playlist_scroll(Tui *t, int step);
+
+
+/*
+ * public
+ */
+int
+tui_init(Tui *t, const char dir_name[])
+{
+	Str *const str = &t->str_buffer;
+	int ret = str_init_alloc(str, 4096);
+	if (ret < 0) {
+		log_err(ret, "tui: tui_init: str_init_alloc");
+		return -1;
+	}
+
+	if (_raw_mode(t) < 0)
+		goto err0;
+
+	t->dir_name = dir_name;
+	t->playlist.state = PLAYER_STATE_STOPPED;
+	t->playlist.top = 0;
+	t->playlist.curr = 0;
+	t->playlist.active = -1;
+	t->playlist.duration = 0;
+	t->playlist.items = NULL;
+	t->playlist.len = 0;
+	return 0;
+
+err0:
+	str_deinit(str);
+	return -1;
+}
+
+
+void
+tui_deinit(Tui *t)
+{
+	Str *const str = &t->str_buffer;
+
+	// disable alternative buffer
+	str_set_n(str, "\x1b[?1049l", 8);
+
+	// restore screen
+	str_append_n(str, "\x1b[?47l", 6);
+
+	// restore cursor position
+	str_append_n(str, "\x1b[u", 3);
+
+	// show the cursor
+	str_append_n(str, "\x1b[?25h", 6);
+
+	// enable line wrap
+	str_append_n(str, "\x1b[?7h", 5);
+
+	// write all
+	str_write_all(str, STDOUT_FILENO);
+
+	tcsetattr(STDIN_FILENO, TCSAFLUSH, &t->termios_orig);
+	str_deinit(str);
+}
+
+
+void
+tui_draw(Tui *t)
+{
+	_resize(t);
+	_clear();
+
+	str_set_n(&t->str_buffer, NULL, 0);
+	_set_header(t);
+	_set_body(t);
+	_set_footer(t);
+	str_write_all(&t->str_buffer, STDOUT_FILENO);
+}
+
+
+void
+tui_show_dialog(Tui *t, const char message[])
+{
+	Str *const str = &t->str_buffer;
+	if (message != NULL) {
+		str_set_fmt(str, "\x1b[%d;1H\x1b[1;" CFG_FOOTER_COLOR_FG ";" CFG_FOOTER_COLOR_BG "m\x1b[K> %s\x1b[m",
+			    t->footer_pos, message);
+	} else {
+		str_set_n(&t->str_buffer, NULL, 0);
+		_set_footer(t);
+	}
+
+	str_write_all(&t->str_buffer, STDOUT_FILENO);
+}
+
+
+void
+tui_set_playlist(Tui *t, TuiPlaylistItem *items[], int len)
+{
+	if (len > 0) {
+		items[0]->is_selected = 1;
+		items[0]->now_playing = 1;
+		t->playlist.active = 0;
+	}
+
+	t->playlist.items = items;
+	t->playlist.len = len;
+	tui_draw(t);
+}
+
+
+void
+tui_set_duration(Tui *t, int64_t duration)
+{
+	t->playlist.duration = duration;
+
+	str_set_n(&t->str_buffer, NULL, 0);
+	_set_footer(t);
+	str_write_all(&t->str_buffer, STDOUT_FILENO);
+}
+
+
+void
+tui_playlist_cursor_up(Tui *t)
+{
+	if (t->playlist.len <= 0)
+		return;
+
+	if (t->playlist.curr == 0) {
+		if (t->playlist.top == 0)
+			return;
+
+		/* scroll up */
+		t->playlist.top--;
+		t->playlist.curr++;
+	}
+
+	_playlist_cursor(t, -1);
+}
+
+
+void
+tui_playlist_cursor_down(Tui *t)
+{
+	if (t->playlist.len <= 0)
+		return;
+
+	const int end = _get_playlist_relative_len(t) - 1;
+	if (t->playlist.curr == end) {
+		if ((t->playlist.top + t->playlist.curr) == (t->playlist.len - 1))
+			return;
+
+		/* scroll down */
+		t->playlist.top++;
+		t->playlist.curr--;
+	}
+
+	_playlist_cursor(t, 1);
+}
+
+
+void
+tui_playlist_page_up(Tui *t)
+{
+	const int end = _get_playlist_relative_len(t) - 1;
+	if ((t->playlist.len <= 0) || (t->playlist.top == 0) || (end <= 0))
+		return;
+
+	if (t->playlist.top < end)
+		_playlist_scroll(t, -(t->playlist.top));
+	else
+		_playlist_scroll(t, -end);
+}
+
+
+void
+tui_playlist_page_down(Tui *t)
+{
+	const int len = t->playlist.len;
+	const int end = _get_playlist_relative_len(t);
+	if ((len < end) || (end <= 0))
+		return;
+
+	const int diff = len - (t->playlist.top + end);
+	if (diff < end)
+		_playlist_scroll(t, diff);
+	else
+		_playlist_scroll(t, end);
+}
+
+
+void
+tui_playlist_top(Tui *t)
+{
+	const int end = _get_playlist_relative_len(t) - 1;
+	if ((t->playlist.len <= 0) || (t->playlist.top == 0) || (end <= 0))
+		return;
+
+	_playlist_scroll(t, -(t->playlist.top));
+}
+
+
+void
+tui_playlist_bottom(Tui *t)
+{
+	const int len = t->playlist.len;
+	const int end = _get_playlist_relative_len(t);
+	if ((len < end) || (end <= 0))
+		return;
+
+	_playlist_scroll(t, (len - end - t->playlist.top));
+}
+
+
+int
+tui_playlist_play(Tui *t)
+{
+	if (t->playlist.len <= 0)
+		return -1;
+
+	const int act_idx = t->playlist.active;
+	if (act_idx >= 0)
+		t->playlist.items[act_idx]->now_playing = 0;
+
+	const int sel_idx = t->playlist.curr + t->playlist.top;
+	t->playlist.items[sel_idx]->now_playing = 1;
+	t->playlist.active = sel_idx;
+	t->playlist.state = PLAYER_STATE_PLAYING;
+	t->playlist.duration = 0;
+
+	str_set_n(&t->str_buffer, NULL, 0);
+	_set_body(t);
+	_set_footer(t);
+	str_write_all(&t->str_buffer, STDOUT_FILENO);
+	return act_idx;
+}
+
+
+int
+tui_playlist_pause(Tui *t)
+{
+	if (t->playlist.len <= 0)
+		return -1;
+
+	const int act_idx = t->playlist.active;
+	if (act_idx < 0)
+		return -1;
+
+	t->playlist.state = PLAYER_STATE_PAUSED;
+
+	str_set_n(&t->str_buffer, NULL, 0);
+	_set_footer(t);
+	str_write_all(&t->str_buffer, STDOUT_FILENO);
+	return act_idx;
+}
+
+
+int
+tui_playlist_stop(Tui *t)
+{
+	const int act_idx = t->playlist.active;
+	if ((t->playlist.len <= 0) || (act_idx < 0))
+		return -1;
+
+	t->playlist.state = PLAYER_STATE_STOPPED;
+	t->playlist.duration = 0;
+
+	str_set_n(&t->str_buffer, NULL, 0);
+	_set_body(t);
+	_set_footer(t);
+	str_write_all(&t->str_buffer, STDOUT_FILENO);
+	return act_idx;
+}
+
+
+int
+tui_playlist_next(Tui *t)
+{
+	if (t->playlist.len <= 0)
+		return -1;
+
+	int idx = t->playlist.active;
+	if ((idx < 0) || ((idx + 1) >= t->playlist.len))
+		return idx;
+
+	t->playlist.items[idx++]->now_playing = 0;
+	t->playlist.items[idx]->now_playing = 1;
+	t->playlist.active = idx;
+
+	str_set_n(&t->str_buffer, NULL, 0);
+	_set_body(t);
+	_set_footer(t);
+	str_write_all(&t->str_buffer, STDOUT_FILENO);
+	return idx;
+}
+
+
+int
+tui_playlist_prev(Tui *t)
+{
+	if (t->playlist.len <= 0)
+		return -1;
+
+	int idx = t->playlist.active;
+	if ((idx < 0) || ((idx - 1) < 0))
+		return idx;
+
+	t->playlist.items[idx--]->now_playing = 0;
+	t->playlist.items[idx]->now_playing = 1;
+	t->playlist.active = idx;
+
+	str_set_n(&t->str_buffer, NULL, 0);
+	_set_body(t);
+	_set_footer(t);
+	str_write_all(&t->str_buffer, STDOUT_FILENO);
+	return idx;
+}
 
 
 /*
  * private
  */
-static int
-_set_raw_mode(Tui *t)
+static void
+_clear(void)
 {
-	if (tcgetattr(STDIN_FILENO, &t->term_orig) < 0)
-		return -errno;
+	write(STDOUT_FILENO, "\x1b[2J", 4);
+}
 
-	struct termios raw = t->term_orig;
-	UNSET(raw.c_lflag, (ECHO | ICANON | IEXTEN | ISIG));
-	UNSET(raw.c_iflag, (BRKINT | ICRNL | INPCK | ISTRIP | IXON));
-	UNSET(raw.c_oflag, OPOST);
-	SET(raw.c_cflag, CS8);
 
-	raw.c_cc[VMIN]  = 0;
-	raw.c_cc[VTIME] = 1;
+static void
+_resize(Tui *t)
+{
+	struct winsize ws;
+	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) < 0)
+		return;
 
-	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) < 0)
-		return -errno;
+	t->width = ws.ws_col;
+	t->height = ws.ws_row;
+	t->header_pos = 1;
+	t->body_pos = t->header_pos + 1;
+	t->footer_pos = t->height;
+}
 
-	Str *const str = &t->str;
+
+static int
+_raw_mode(Tui *t)
+{
+	Str *const str = &t->str_buffer;
+	if (tcgetattr(STDIN_FILENO, &t->termios_orig) < 0) {
+		log_err(errno, "tui: _raw_mode: tcgetattr");
+		return -1;
+	}
+
+	TermIOS termios = t->termios_orig;
+	UNSET(termios.c_lflag, (ECHO | ICANON | IEXTEN | ISIG));
+	UNSET(termios.c_iflag, (BRKINT | ICRNL | INPCK | ISTRIP | IXON));
+	UNSET(termios.c_oflag, OPOST);
+	SET(termios.c_cflag, CS8);
+
+	termios.c_cc[VMIN]  = 0;
+	termios.c_cc[VTIME] = 1;
+	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &termios) < 0) {
+		log_err(errno, "tui: _raw_mode: tcsetattr");
+		return -1;
+	}
 
 	// save cursor position
 	str_set_n(str, "\x1b[s", 3);
@@ -62,149 +415,141 @@ _set_raw_mode(Tui *t)
 }
 
 
-/*
- * public
- */
-int
-tui_init(Tui *t)
+static void
+_set_playlist(Tui *t, const char name[], int64_t dur, int is_sel, int now_pl, int pos)
 {
-	int ret = str_init(&t->str, t->str_buffer, sizeof(t->str_buffer));
-	assert(ret == 0);
-
-	ret = tui_resize(t);
-	if (ret < 0)
-		return ret;
-
-	ret = _set_raw_mode(t);
-	if (ret < 0)
-		return ret;
-
-	return 0;
-}
-
-
-void
-tui_deinit(Tui *t)
-{
-	Str *const str = &t->str;
-
-	// disable alternative buffer
-	str_set_n(str, "\x1b[?1049l", 8);
-
-	// restore screen
-	str_append_n(str, "\x1b[?47l", 6);
-
-	// restore cursor position
-	str_append_n(str, "\x1b[u", 3);
-
-	// show the cursor
-	str_append_n(str, "\x1b[?25h", 6);
-
-	// enable line wrap
-	str_append_n(str, "\x1b[?7h", 5);
-
-	// write all
-	str_write_all(str, STDOUT_FILENO);
-
-	const int ret = tcsetattr(STDIN_FILENO, TCSAFLUSH, &t->term_orig);
-	assert(ret == 0);
-
-	str_deinit(str);
-}
-
-
-int
-tui_resize(Tui *t)
-{
-	struct winsize ws;
-	if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) < 0)
-		return -errno;
-
-	t->width = ws.ws_col;
-	t->height = ws.ws_row;
-	t->header_pos = 1;
-	t->body_pos = t->header_pos + 1;
-	t->footer_pos = t->height;
-	return 0;
-}
-
-
-void
-tui_clear(void)
-{
-	write(STDOUT_FILENO, "\x1b[2J", 4);
-}
-
-
-void
-tui_show_dialog(Tui *t, const char message[])
-{
-	Str *const str = &t->str;
-	str_set_fmt(str, "\x1b[%d;1H\x1b[1;" CFG_FOOTER_COLOR_FG ";" CFG_FOOTER_COLOR_BG "m\x1b[K> %s\x1b[m",
-		t->footer_pos, message);
-	str_write_all(str, STDOUT_FILENO);
-}
-
-
-void
-tui_header_set(Tui *t, const char dir_name[], int curr, int total)
-{
-	Str *const str = &t->str;
-	const int cpos = t->width - snprintf(NULL, 0, CFG_HEADER_LABEL " [%d/%d]", curr, total);
-
-	str_set_fmt(str, "\x1b[%d;1H\x1b[1;" CFG_HEADER_COLOR_FG ";" CFG_HEADER_COLOR_BG "m\x1b[K%s",
-		    t->header_pos, dir_name);
-	str_append_fmt(str, "\x1b[%d;%dH " CFG_HEADER_LABEL " [%d/%d]\x1b[m", t->header_pos, cpos, curr, total);
-	str_write_all(str, STDOUT_FILENO);
-}
-
-
-void
-tui_body_set_item(Tui *t, const char name[], int64_t duration, int is_selected, int now_playing, int pos)
-{
-	char dur[64];
-	Str *const str = &t->str;
-	const char *const _duration = cstr_time_fmt(dur, sizeof(dur), duration);
+	char buff[64];
+	Str *const str = &t->str_buffer;
+	const char *const _duration = cstr_time_fmt(buff, sizeof(buff), dur);
 	const int dpos = t->width - (int)strlen(_duration);
 
 	pos += t->body_pos;
-	str_set_fmt(str, "\x1b[%d;1H", pos);
-	if (is_selected) {
-		str_append(str, "\x1b[" CFG_BODY_SEL_COLOR_FG ";" CFG_BODY_SEL_COLOR_BG "m\x1b[K");
-	} else {
-		if (now_playing)
-			str_append(str, "\x1b[1;" CFG_BODY_COLOR_FG ";" CFG_BODY_COLOR_BG "m\x1b[K");
-		else
-			str_append(str, "\x1b[" CFG_BODY_COLOR_FG ";" CFG_BODY_COLOR_BG "m\x1b[K");
-	}
+	str_append_fmt(str, "\x1b[%d;1H", pos);
 
-	str_append_fmt(str, "%c%s", (now_playing == 0)? ' ':'>', name);
+	if (is_sel)
+		str_append(str, "\x1b[" CFG_BODY_SEL_COLOR_FG ";" CFG_BODY_SEL_COLOR_BG "m\x1b[K");
+	else if (now_pl)
+		str_append(str, "\x1b[1;" CFG_BODY_COLOR_FG ";" CFG_BODY_COLOR_BG "m\x1b[K");
+	else
+		str_append(str, "\x1b[" CFG_BODY_COLOR_FG ";" CFG_BODY_COLOR_BG "m\x1b[K");
+
+	const char flag = (now_pl == 0)? ' ' : '>';
+	str_append_fmt(str, "%c%s", flag, name);
 	str_append_fmt(str, "\x1b[%d;%dH %s \x1b[m", pos, dpos - 1, _duration);
-	str_write_all(&t->str, STDOUT_FILENO);
 }
 
 
-int
-tui_body_get_items_len(const Tui *t)
+static void
+_set_header(Tui *t)
+{
+	int curr = 0;
+	if ((t->playlist.items != NULL) || (t->playlist.len > 0))
+		curr = t->playlist.curr + t->playlist.top + 1;
+
+	Str *const str = &t->str_buffer;
+	const int total = t->playlist.len;
+	const int clen = snprintf(NULL, 0, CFG_HEADER_LABEL " [%u/%u]", curr, total);
+	const int cpos = t->width - clen;
+
+	str_append_fmt(str, "\x1b[%d;1H\x1b[1;" CFG_HEADER_COLOR_FG ";" CFG_HEADER_COLOR_BG "m\x1b[K%s",
+		       t->header_pos, t->dir_name);
+	str_append_fmt(str, "\x1b[%d;%dH " CFG_HEADER_LABEL " [%u/%u]\x1b[m", t->header_pos, cpos, curr, total);
+}
+
+
+static void
+_set_body(Tui *t)
+{
+	const int end = _get_playlist_relative_len(t);
+	if ((t->playlist.len <= 0) || (end <= 0))
+		return;
+
+	int diff = t->playlist.curr - end;
+	const int sum = t->playlist.top + end;
+	if (diff >= 0) {
+		t->playlist.curr = (end - 1);
+		t->playlist.top += (diff + 1);
+	} else if ((sum > t->playlist.len) && (t->playlist.top > 0)) {
+		diff = (sum - (t->playlist.len - 1)) - 1;
+		if (diff > t->playlist.top)
+			diff -= (diff - t->playlist.top);
+
+		t->playlist.curr += diff;
+		t->playlist.top -= diff;
+	}
+
+	int len = end + t->playlist.top;
+	if (len > t->playlist.len)
+		len -= (len - t->playlist.len);
+
+	int pos = 0;
+	for (int i = t->playlist.top; i < len; i++) {
+		TuiPlaylistItem *const p = t->playlist.items[i];
+		_set_playlist(t, p->item.name, p->item.duration, p->is_selected, p->now_playing, pos++);
+	}
+}
+
+
+static void
+_set_footer(Tui *t)
+{
+	Str *const str = &t->str_buffer;
+	if (t->playlist.len <= 0) {
+		str_append_fmt(str, "\x1b[%d;1H\x1b[1;" CFG_FOOTER_COLOR_FG ";" CFG_FOOTER_COLOR_BG
+			       "m\x1b[K> %s\x1b[m", t->footer_pos, "No Data!");
+		return;
+	}
+
+	char dur0[64];
+	char dur1[64];
+	const TuiPlaylistItem *const pl = t->playlist.items[t->playlist.active];
+	const char *const d0 = cstr_time_fmt(dur0, sizeof(dur0), t->playlist.duration);
+	const char *const d1 = cstr_time_fmt(dur1, sizeof(dur1), pl->item.duration);
+	const int dpos = t->width - snprintf(NULL, 0, "[%s - %s]", d0, d1);
+
+	str_append_fmt(str, "\x1b[%d;1H", t->footer_pos);
+	str_append_fmt(str, "\x1b[1;" CFG_FOOTER_COLOR_FG ";" CFG_FOOTER_COLOR_BG "m\x1b[K[%c] %d. %s",
+		       _player_state_chr[t->playlist.state], t->playlist.active + 1, pl->item.name);
+	str_append_fmt(str, "\x1b[%d;%dH [%s - %s]\x1b[m", t->footer_pos, dpos, d0, d1);
+}
+
+
+static inline int
+_get_playlist_relative_len(const Tui *t)
 {
 	return t->footer_pos - 2;
 }
 
 
-void
-tui_footer_set(Tui *t, char ctrl, int num, int64_t dur_curr, int64_t dur_total, const char name[])
+static void
+_playlist_cursor(Tui *t, int step)
 {
-	char dur0[64];
-	char dur1[64];
-	Str *const str = &t->str;
-	const char *const d0 = cstr_time_fmt(dur0, sizeof(dur0), dur_curr);
-	const char *const d1 = cstr_time_fmt(dur1, sizeof(dur1), dur_total);
+	const int idx = t->playlist.curr + t->playlist.top;
+	if (step > 0 && idx >= t->playlist.len - 1)
+		return;
 
-	const int dpos = t->width - snprintf(NULL, 0, "[%s - %s]", d0, d1);
-	str_set_fmt(str, "\x1b[%d;1H", t->footer_pos);
-	str_append_fmt(str, "\x1b[1;" CFG_FOOTER_COLOR_FG ";" CFG_FOOTER_COLOR_BG "m\x1b[K[%c] %d. %s",
-		       ctrl, num, name);
-	str_append_fmt(str, "\x1b[%d;%dH [%s - %s]\x1b[m", t->footer_pos, dpos, d0, d1);
-	str_write_all(str, STDOUT_FILENO);
+	t->playlist.items[idx]->is_selected = 0;
+	t->playlist.items[idx + step]->is_selected = 1;
+	t->playlist.curr += step;
+
+	str_set_n(&t->str_buffer, NULL, 0);
+	_set_header(t);
+	_set_body(t);
+	str_write_all(&t->str_buffer, STDOUT_FILENO);
+}
+
+
+static void
+_playlist_scroll(Tui *t, int step)
+{
+	const int idx = t->playlist.curr + t->playlist.top;
+	t->playlist.items[idx]->is_selected = 0;
+	t->playlist.items[idx + step]->is_selected = 1;
+	t->playlist.top += step;
+
+	str_set_n(&t->str_buffer, NULL, 0);
+	_set_header(t);
+	_set_body(t);
+	str_write_all(&t->str_buffer, STDOUT_FILENO);
 }
 
