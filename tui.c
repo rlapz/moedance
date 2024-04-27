@@ -25,7 +25,7 @@ static const char _player_state_chr[] = {
 static void _clear(void);
 static void _resize(Tui *t);
 static int  _raw_mode(Tui *t);
-static void _set_playlist(Tui *t, const char name[], int64_t dur, int is_sel, int now_pl, int pos);
+static void _set_playlist(Tui *t, int idx, int pos);
 static void _set_header(Tui *t);
 static void _set_body(Tui *t);
 static void _set_footer(Tui *t);
@@ -196,10 +196,11 @@ tui_playlist_page_up(Tui *t)
 	if ((t->playlist.len <= 0) || (t->playlist.top == 0) || (end <= 0))
 		return;
 
-	if (t->playlist.top < end)
-		_playlist_scroll(t, -(t->playlist.top));
-	else
-		_playlist_scroll(t, -end);
+	int step = t->playlist.top;
+	if (step >= end)
+		step = end;
+
+	_playlist_scroll(t, -step);
 }
 
 
@@ -211,11 +212,11 @@ tui_playlist_page_down(Tui *t)
 	if ((len < end) || (end <= 0))
 		return;
 
-	const int diff = len - (t->playlist.top + end);
-	if (diff < end)
-		_playlist_scroll(t, diff);
-	else
-		_playlist_scroll(t, end);
+	int step = len - (t->playlist.top + end);
+	if (step >= end)
+		step = end;
+
+	_playlist_scroll(t, step);
 }
 
 
@@ -416,26 +417,28 @@ _raw_mode(Tui *t)
 
 
 static void
-_set_playlist(Tui *t, const char name[], int64_t dur, int is_sel, int now_pl, int pos)
+_set_playlist(Tui *t, int idx, int pos)
 {
 	char buff[64];
 	Str *const str = &t->str_buffer;
-	const char *const _duration = cstr_time_fmt(buff, sizeof(buff), dur);
-	const int dpos = t->width - (int)strlen(_duration);
+	TuiPlaylistItem *const playlist = t->playlist.items[idx];
+	PlayerItem *const item = &playlist->item;
+	const char *const duration = cstr_time_fmt(buff, sizeof(buff), item->duration);
+	const int dpos = t->width - (int)strlen(duration);
 
 	pos += t->body_pos;
 	str_append_fmt(str, "\x1b[%d;1H", pos);
 
-	if (is_sel)
+	if (playlist->is_selected)
 		str_append(str, "\x1b[" CFG_BODY_SEL_COLOR_FG ";" CFG_BODY_SEL_COLOR_BG "m\x1b[K");
-	else if (now_pl)
+	else if (playlist->now_playing)
 		str_append(str, "\x1b[1;" CFG_BODY_COLOR_FG ";" CFG_BODY_COLOR_BG "m\x1b[K");
 	else
 		str_append(str, "\x1b[" CFG_BODY_COLOR_FG ";" CFG_BODY_COLOR_BG "m\x1b[K");
 
-	const char flag = (now_pl == 0)? ' ' : '>';
-	str_append_fmt(str, "%c%s", flag, name);
-	str_append_fmt(str, "\x1b[%d;%dH %s \x1b[m", pos, dpos - 1, _duration);
+	const char flag = (playlist->now_playing == 0)? ' ' : '>';
+	str_append_fmt(str, "%c%s", flag, item->name);
+	str_append_fmt(str, "\x1b[%d;%dH %s \x1b[m", pos, dpos - 1, duration);
 }
 
 
@@ -483,10 +486,8 @@ _set_body(Tui *t)
 		len -= (len - t->playlist.len);
 
 	int pos = 0;
-	for (int i = t->playlist.top; i < len; i++) {
-		TuiPlaylistItem *const p = t->playlist.items[i];
-		_set_playlist(t, p->item.name, p->item.duration, p->is_selected, p->now_playing, pos++);
-	}
+	for (int i = t->playlist.top; i < len; i++)
+		_set_playlist(t, i, pos++);
 }
 
 

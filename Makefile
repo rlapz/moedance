@@ -7,8 +7,8 @@ VERSION = 0.0.1
 
 PREFIX = /usr
 CC     = cc
-CFLAGS = -std=c99 -Wall -Wextra -D_XOPEN_SOURCE=700 -pedantic -O3
-#CFLAGS = -std=c99 -Wall -Wextra -D_XOPEN_SOURCE=700 -pedantic -g
+#CFLAGS = -std=c99 -Wall -Wextra -D_XOPEN_SOURCE=700 -pedantic -O3
+CFLAGS = -std=c99 -Wall -Wextra -D_XOPEN_SOURCE=700 -pedantic -g
 OPT    = 
 
 SRC = main.c moedance.c tui.c player.c  util.c

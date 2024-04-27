@@ -25,7 +25,8 @@
 
 
 #define CFG_DIR_RECURSIVE_SIZE (20)
-#define CFG_LOG_FILE      "/tmp/moedance.log"
+#define CFG_LOG_FILE           "/tmp/moedance.log"
+
 
 #endif
 

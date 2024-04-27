@@ -16,7 +16,7 @@ enum {
 
 typedef struct {
 	const char *name;
-	int64_t     duration;
+	int64_t     duration; /* max duration */
 	const char *file_ext;
 	char        file_path[1];
 } PlayerItem;
