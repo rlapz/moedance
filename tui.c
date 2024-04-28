@@ -32,8 +32,7 @@ static void _set_header(Tui *t);
 static void _set_body(Tui *t);
 static void _set_footer(Tui *t);
 static int  _get_playlist_relative_len(const Tui *t);
-static void _playlist_cursor(Tui *t, int step);
-static void _playlist_scroll(Tui *t, int step);
+static void _playlist_cursor(Tui *t, int step, int is_scroll);
 
 
 /*
@@ -205,7 +204,7 @@ tui_playlist_cursor_up(Tui *t)
 		t->playlist.curr++;
 	}
 
-	_playlist_cursor(t, -1);
+	_playlist_cursor(t, -1, 0);
 }
 
 
@@ -222,7 +221,7 @@ tui_playlist_cursor_down(Tui *t)
 		t->playlist.curr--;
 	}
 
-	_playlist_cursor(t, 1);
+	_playlist_cursor(t, 1, 0);
 }
 
 
@@ -237,7 +236,7 @@ tui_playlist_page_up(Tui *t)
 	if (step >= end)
 		step = end;
 
-	_playlist_scroll(t, -step);
+	_playlist_cursor(t, -step, 1);
 }
 
 
@@ -253,7 +252,7 @@ tui_playlist_page_down(Tui *t)
 	if (step >= end)
 		step = end;
 
-	_playlist_scroll(t, step);
+	_playlist_cursor(t, step, 1);
 }
 
 
@@ -583,30 +582,19 @@ _get_playlist_relative_len(const Tui *t)
 
 
 static void
-_playlist_cursor(Tui *t, int step)
+_playlist_cursor(Tui *t, int step, int is_scroll)
 {
 	const int idx = t->playlist.curr + t->playlist.top;
 	if ((step > 0) && (idx >= t->playlist.len - 1))
 		return;
 
+	if (is_scroll)
+		t->playlist.top += step;
+	else
+		t->playlist.curr += step;
+
 	t->playlist.items[idx].is_selected = 0;
 	t->playlist.items[idx + step].is_selected = 1;
-	t->playlist.curr += step;
-
-	_draw_begin(t);
-	_set_header(t);
-	_set_body(t);
-	_draw_end(t);
-}
-
-
-static void
-_playlist_scroll(Tui *t, int step)
-{
-	const int idx = t->playlist.curr + t->playlist.top;
-	t->playlist.items[idx].is_selected = 0;
-	t->playlist.items[idx + step].is_selected = 1;
-	t->playlist.top += step;
 
 	_draw_begin(t);
 	_set_header(t);
