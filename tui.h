@@ -58,11 +58,12 @@ void tui_playlist_page_up(Tui *t);
 void tui_playlist_page_down(Tui *t);
 void tui_playlist_top(Tui *t);
 void tui_playlist_bottom(Tui *t);
-int  tui_playlist_play(Tui *t);
-int  tui_playlist_pause(Tui *t);
-int  tui_playlist_stop(Tui *t);
-int  tui_playlist_next(Tui *t);
-int  tui_playlist_prev(Tui *t);
+
+const PlaylistItem *tui_playlist_play(Tui *t);
+const PlaylistItem *tui_playlist_pause(Tui *t);
+const PlaylistItem *tui_playlist_stop(Tui *t);
+const PlaylistItem *tui_playlist_next(Tui *t);
+const PlaylistItem *tui_playlist_prev(Tui *t);
 
 
 #endif

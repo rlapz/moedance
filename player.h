@@ -16,18 +16,16 @@ enum {
 };
 
 typedef struct {
-	int                  state;
-	int64_t              playlist_item_duration;
-	int                  playlist_item_curr;
-	int                  playlist_items_len;
-	const PlaylistItem **playlist_items;
+	int                 state;
+	int64_t             playlist_item_duration;
+	const PlaylistItem *playlist_item;
 } Player;
 
 
 int  player_init(Player *p);
 void player_deinit(Player *p);
-void player_set_playlist(Player *p, const PlaylistItem *items[], int len);
-int  player_play(Player *p, int idx);
+int  player_play(Player *p, const PlaylistItem *item);
+void player_pause(Player *p);
 void player_stop(Player *p);
 
 

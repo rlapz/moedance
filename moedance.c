@@ -108,7 +108,6 @@ _set_playlist(MoeDance *m)
 	if (items == NULL)
 		tui_show_dialog(&m->tui, "Failed to load file(s) from the given root dir!");
 
-	player_set_playlist(&m->player, items, items_len);
 	tui_set_playlist(&m->tui, items, items_len);
 }
 
@@ -331,7 +330,9 @@ _kbd_handle_key_stop(MoeDance *m)
 static void
 _kbd_handle_key_enter(MoeDance *m)
 {
-	tui_playlist_play(&m->tui);
+	const PlaylistItem *const item = tui_playlist_play(&m->tui);
+	if (item != NULL)
+		log_info("%s", item->name);
 }
 
 
@@ -348,13 +349,17 @@ _kbd_handle_key_toggle_play(MoeDance *m)
 static void
 _kbd_handle_key_next(MoeDance *m)
 {
-	tui_playlist_next(&m->tui);
+	const PlaylistItem *const item = tui_playlist_next(&m->tui);
+	if (item != NULL)
+		log_info("next: %s", item->name);
 }
 
 
 static void
 _kbd_handle_key_prev(MoeDance *m)
 {
-	tui_playlist_prev(&m->tui);
+	const PlaylistItem *const item = tui_playlist_prev(&m->tui);
+	if (item != NULL)
+		log_info("prev: %s", item->name);
 }
 
