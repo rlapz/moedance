@@ -101,12 +101,14 @@ tui_deinit(Tui *t)
 void
 tui_draw(Tui *t)
 {
-	_resize(t);
 	_clear();
+	_resize(t);
+	_draw_begin(t);
+	_set_header(t);
 
 	const int end = _get_playlist_relative_len(t);
-	if ((t->playlist.len <= 0) || (end <= 0))
-		return;
+	if (end <= 0)
+		goto out0;
 
 	int diff = t->playlist.curr - end;
 	const int sum = t->playlist.top + end;
@@ -122,9 +124,9 @@ tui_draw(Tui *t)
 		t->playlist.top -= diff;
 	}
 
-	_draw_begin(t);
-	_set_header(t);
 	_set_body(t);
+
+out0:
 	_set_footer(t);
 	_draw_end(t);
 }
@@ -194,9 +196,6 @@ tui_set_duration(Tui *t, int64_t duration)
 void
 tui_playlist_cursor_up(Tui *t)
 {
-	if (t->playlist.len <= 0)
-		return;
-
 	if (t->playlist.curr == 0) {
 		if (t->playlist.top == 0)
 			return;
@@ -213,9 +212,6 @@ tui_playlist_cursor_up(Tui *t)
 void
 tui_playlist_cursor_down(Tui *t)
 {
-	if (t->playlist.len <= 0)
-		return;
-
 	const int end = _get_playlist_relative_len(t) - 1;
 	if (t->playlist.curr == end) {
 		if ((t->playlist.top + t->playlist.curr) == (t->playlist.len - 1))
@@ -545,11 +541,7 @@ _set_header(Tui *t)
 static void
 _set_body(Tui *t)
 {
-	const int end = _get_playlist_relative_len(t);
-	if ((t->playlist.len <= 0) || (end <= 0))
-		return;
-
-	int len = end + t->playlist.top;
+	int len = t->playlist.top + _get_playlist_relative_len(t);
 	if (len > t->playlist.len)
 		len -= (len - t->playlist.len);
 
@@ -594,7 +586,7 @@ static void
 _playlist_cursor(Tui *t, int step)
 {
 	const int idx = t->playlist.curr + t->playlist.top;
-	if (step > 0 && idx >= t->playlist.len - 1)
+	if ((step > 0) && (idx >= t->playlist.len - 1))
 		return;
 
 	t->playlist.items[idx].is_selected = 0;
