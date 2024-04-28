@@ -11,7 +11,7 @@ CC     = cc
 CFLAGS = -std=c99 -Wall -Wextra -D_XOPEN_SOURCE=700 -pedantic -g
 OPT    = 
 
-SRC = main.c moedance.c tui.c player.c  util.c
+SRC = main.c moedance.c tui.c player.c playlist.c util.c
 OBJ = $(SRC:.c=.o)
 
 #---------------------------------------------------------------------------------------------------#

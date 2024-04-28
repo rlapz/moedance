@@ -27,8 +27,7 @@ enum {
 };
 
 
-static char _tmp_buffer[4096]; /* general purpose buffer, be aware! */
-
+static void _set_playlist(MoeDance *m);
 
 static int  _set_signal_handler(MoeDance *m);
 static int  _event_loop(MoeDance *m);
@@ -45,12 +44,6 @@ static void _kbd_handle_key_toggle_play(MoeDance *m);
 static void _kbd_handle_key_next(MoeDance *m);
 static void _kbd_handle_key_prev(MoeDance *m);
 
-static int  _item_new(TuiPlaylistItem **new_item, const char path[], int path_len);
-
-static int  _sort_dir_cb(const struct dirent **a, const struct dirent **b);
-static void _load_files(Str *str, ArrayPtr *file_arr, const char path[], int max_depth);
-static void _load_files_recurse(MoeDance *m, int max_depth);
-
 
 /*
  * public
@@ -60,36 +53,26 @@ moedance_init(MoeDance *m, const char root_dir[])
 {
 	m->flags = 0;
 	m->root_dir = root_dir;
-	m->playlist_items = NULL;
-	m->playlist_items_len = 0;
 	m->poll_fds[MOEDANCE_FD_KBD].fd = STDIN_FILENO;
 	m->poll_fds[MOEDANCE_FD_KBD].events = POLLIN;
+
+	playlist_init(&m->playlist);
 }
 
 
 void
 moedance_deinit(MoeDance *m)
 {
-	TuiPlaylistItem **const items = m->playlist_items;
-	for (int i = 0; i < m->playlist_items_len; i++)
-		free(items[i]);
-
-	free(items);
+	playlist_deinit(&m->playlist);
 }
 
 
 int
 moedance_run(MoeDance *m)
 {
-	int ret = chdir(m->root_dir);
-	if (ret < 0) {
-		log_err(errno, "moedance: moedance_run: chdir: \"%s\"", m->root_dir);
-		return -1;
-	}
-
 	log_file_init(CFG_LOG_FILE);
 
-	ret = player_init(&m->player);
+	int ret = player_init(&m->player);
 	if (ret < 0)
 		goto out0;
 
@@ -98,7 +81,8 @@ moedance_run(MoeDance *m)
 		goto out1;
 
 	tui_draw(&m->tui);
-	_load_files_recurse(m, CFG_DIR_RECURSIVE_SIZE);
+
+	_set_playlist(m);
 
 	ret = _event_loop(m);
 	tui_deinit(&m->tui);
@@ -114,6 +98,21 @@ out0:
 /*
  * private
  */
+static void
+_set_playlist(MoeDance *m)
+{
+	tui_show_dialog(&m->tui, "Loading...");
+
+	int items_len = 0;
+	const PlaylistItem **const items = playlist_load(&m->playlist, m->root_dir, &items_len);
+	if (items == NULL)
+		tui_show_dialog(&m->tui, "Failed to load file(s) from the given root dir!");
+
+	player_set_playlist(&m->player, items, items_len);
+	tui_set_playlist(&m->tui, items, items_len);
+}
+
+
 static int
 _set_signal_handler(MoeDance *m)
 {
@@ -205,16 +204,17 @@ out0:
 static void
 _event_handle_kbd(MoeDance *m, int fd)
 {
-	const ssize_t rd = read(fd, _tmp_buffer, LEN(_tmp_buffer));
+	char buffer[4096];
+	const ssize_t rd = read(fd, buffer, sizeof(buffer));
 	if (rd < 0) {
 		log_err(errno, "moedance: _event_handle_kbd: read");
 		return;
 	}
 
-	if (_tmp_buffer[0] == '\x1b')
-		_event_handle_kbd_escape(m, &_tmp_buffer[1], (int)rd - 1);
+	if (buffer[0] == '\x1b')
+		_event_handle_kbd_escape(m, &buffer[1], (int)rd - 1);
 	else
-		_event_handle_kbd_normal(m, _tmp_buffer[0]);
+		_event_handle_kbd_normal(m, buffer[0]);
 }
 
 
@@ -356,170 +356,5 @@ static void
 _kbd_handle_key_prev(MoeDance *m)
 {
 	tui_playlist_prev(&m->tui);
-}
-
-
-static int
-_item_new(TuiPlaylistItem **new_item, const char path[], int path_len)
-{
-	int ret = -1;
-	const int fd = open(path, O_RDONLY);
-	if (fd < 0) {
-		log_err(errno, "moedance: _item_new: open: \"%s\"", path);
-		return -1;
-	}
-
-	struct stat st;
-	if (fstat(fd, &st) < 0) {
-		log_err(errno, "moedance: _item_new: fstat: \"%s\"", path);
-		goto out0;
-	}
-
-	TuiPlaylistItem *const item = malloc(sizeof(TuiPlaylistItem) + ((size_t)path_len + 1));
-	if (item == NULL) {
-		log_err(errno, "moedance: _item_new: tui item: malloc: \"%s\"", path);
-		free(item);
-		goto out0;
-	}
-
-	memcpy(item->item.file_path, path, path_len);
-	item->item.file_path[path_len] = '\0';
-
-#if CFG_PLAYLIST_SHOW_FULL_PATH == 1
-	item->item.name = item->item.file_path + 2;
-#else
-	const char *const name = strrchr(item->item.file_path, '/');
-	if (name != NULL)
-		item->item.name = name + 1;
-	else
-		item->item.name = item->item.file_path;
-#endif
-
-	const char *const ext = strrchr(item->item.file_path, '.');
-	if (ext != NULL)
-		item->item.file_ext = ext + 1;
-	else
-		item->item.file_ext = NULL;
-
-	item->item.duration = 0;
-	item->is_selected = 0;
-	item->now_playing = 0;
-	*new_item = item;
-	ret = 0;
-
-out0:
-	close(fd);
-	return ret;
-}
-
-
-static int
-_sort_dir_cb(const struct dirent **a, const struct dirent **b)
-{
-	return cstr_cmp_vers((*a)->d_name, (*b)->d_name);
-}
-
-
-static void
-_load_files(Str *str, ArrayPtr *file_arr, const char path[], int max_depth)
-{
-	int ret, num;
-	struct stat st;
-	struct dirent **list;
-	TuiPlaylistItem *new_item;
-	ArrayPtr dir_arr;
-	char *dir_name;
-
-
-	array_ptr_init(&dir_arr);
-	if (file_arr->len == INT_MAX - 1)
-		return;
-
-	num = scandir(path, &list, NULL, _sort_dir_cb);
-	if (num < 0) {
-		ret = -errno;
-		log_err(ret, "moedance: _load_files: scandir: %s", path);
-		return;
-	}
-
-	for (int i = 0; i < num; i++) {
-		const char *const name = list[i]->d_name;
-		if (name[0] == '.') {
-			free(list[i]);
-			continue;
-		}
-
-		str_set_fmt(str, "%s/%s", path, name);
-		if (stat(str->cstr, &st) < 0) {
-			free(list[i]);
-			continue;
-		}
-
-		switch (st.st_mode & S_IFMT) {
-		case S_IFDIR:
-			/* be aware! */
-			if (max_depth == 0)
-				return;
-
-			dir_name = str_dup(str);
-			if (dir_name == NULL) {
-				log_err(errno, "moedance: _load_files: str_dup: %s", str->cstr);
-				break;
-			}
-
-			ret = array_ptr_append(&dir_arr, dir_name);
-			if (ret < 0) {
-				log_err(errno, "moedance: _load_files: array_ptr_append: %s", dir_name);
-				free(dir_name);
-			}
-
-			break;
-		case S_IFREG:
-			if (_item_new(&new_item, str->cstr, str->len) < 0)
-				break;
-
-			ret = array_ptr_append(file_arr, new_item);
-			if (ret < 0) {
-				log_err(ret, "moedance: _load_files: array_ptr_append: %s", str->cstr);
-				free(new_item);
-			}
-
-			break;
-		}
-
-		free(list[i]);
-	}
-
-	free(list);
-	for (size_t i = 0; i < dir_arr.len; i++) {
-		dir_name = (char *)dir_arr.items[i];
-
-		/* be aware! */
-		_load_files(str, file_arr, dir_name, max_depth - 1);
-		free(dir_name);
-	}
-
-	array_ptr_deinit(&dir_arr);
-}
-
-
-static void
-_load_files_recurse(MoeDance *m, int max_depth)
-{
-	ArrayPtr arr;
-	array_ptr_init(&arr);
-
-	Str str;
-	str_init(&str, _tmp_buffer, LEN(_tmp_buffer));
-
-	tui_show_dialog(&m->tui, "Loading...");
-	_load_files(&str, &arr, ".", max_depth);
-
-
-	/* transfer the ownership */
-	m->playlist_items = (TuiPlaylistItem **)arr.items;
-	m->playlist_items_len = (int)arr.len;
-
-	tui_set_playlist(&m->tui, m->playlist_items, m->playlist_items_len);
 }
 

@@ -7,24 +7,25 @@
 #include <stdint.h>
 
 #include "player.h"
+#include "playlist.h"
 #include "util.h"
 #include "config.h"
 
 
 typedef struct {
-	int        is_selected;
-	int        now_playing;
-	PlayerItem item;
+	int                 is_selected;
+	int                 now_playing;
+	const PlaylistItem *item;
 } TuiPlaylistItem;
 
 typedef struct {
-	int               state;
-	int               top;
-	int               curr;
-	int               active;
-	int64_t           duration;	/* min duration */
-	TuiPlaylistItem **items;
-	int               len;
+	int              state;
+	int              top;
+	int              curr;
+	int              active;
+	int64_t          duration;	/* min duration */
+	TuiPlaylistItem *items;
+	int              len;
 } TuiPlaylist;
 
 typedef struct termios TermIOS;
@@ -48,7 +49,7 @@ void tui_draw(Tui *t);
 
 void tui_show_dialog(Tui *t, const char message[]);
 
-void tui_set_playlist(Tui *t, TuiPlaylistItem *items[], int len);
+int  tui_set_playlist(Tui *t, const PlaylistItem *items[], int len);
 void tui_set_duration(Tui *t, int64_t duration);
 
 void tui_playlist_cursor_up(Tui *t);

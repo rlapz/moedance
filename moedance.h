@@ -7,6 +7,7 @@
 
 #include "tui.h"
 #include "player.h"
+#include "playlist.h"
 
 
 enum {
@@ -17,13 +18,12 @@ enum {
 };
 
 typedef struct {
-	int               flags;
-	const char       *root_dir;
-	TuiPlaylistItem **playlist_items;
-	int               playlist_items_len;
-	Tui               tui;
-	Player            player;
-	struct pollfd     poll_fds[__MOEDANCE_FD_SIZE];
+	int            flags;
+	const char    *root_dir;
+	Tui            tui;
+	Player         player;
+	Playlist       playlist;
+	struct pollfd  poll_fds[__MOEDANCE_FD_SIZE];
 } MoeDance;
 
 

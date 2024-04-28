@@ -4,6 +4,7 @@
 
 #include <stdint.h>
 
+#include "playlist.h"
 #include "util.h"
 
 
@@ -15,20 +16,18 @@ enum {
 };
 
 typedef struct {
-	const char *name;
-	int64_t     duration; /* max duration */
-	const char *file_ext;
-	char        file_path[1];
-} PlayerItem;
-
-typedef struct {
-	int sound_init;
-	int state;
+	int                  state;
+	int64_t              playlist_item_duration;
+	int                  playlist_item_curr;
+	int                  playlist_items_len;
+	const PlaylistItem **playlist_items;
 } Player;
+
 
 int  player_init(Player *p);
 void player_deinit(Player *p);
-int  player_play(Player *p, const char file_path[], int64_t offt);
+void player_set_playlist(Player *p, const PlaylistItem *items[], int len);
+int  player_play(Player *p, int idx);
 void player_stop(Player *p);
 
 

@@ -91,6 +91,8 @@ tui_deinit(Tui *t)
 
 	tcsetattr(STDIN_FILENO, TCSAFLUSH, &t->termios_orig);
 	str_deinit(str);
+
+	free(t->playlist.items);
 }
 
 
@@ -124,18 +126,37 @@ tui_show_dialog(Tui *t, const char message[])
 }
 
 
-void
-tui_set_playlist(Tui *t, TuiPlaylistItem *items[], int len)
+int
+tui_set_playlist(Tui *t, const PlaylistItem *items[], int len)
 {
-	if (len > 0) {
-		items[0]->is_selected = 1;
-		items[0]->now_playing = 1;
-		t->playlist.active = 0;
+	TuiPlaylistItem *_items = NULL;
+	if (len <= 0) {
+		len = 0;
+		goto out0;
 	}
 
-	t->playlist.items = items;
+	_items = malloc(sizeof(TuiPlaylistItem) * (size_t)len);
+	if (_items == NULL) {
+		log_err(errno, "tui: tui_set_playlist: malloc");
+		tui_show_dialog(t, "Failed to load file(s) from the given root dir!");
+		return -1;
+	}
+
+	for (int i = 0; i < len; i++) {
+		_items[i].is_selected = 0;
+		_items[i].now_playing = 0;
+		_items[i].item = items[i];
+	}
+
+	_items[0].is_selected = 1;
+	_items[0].now_playing = 1;
+	t->playlist.active = 0;
+
+out0:
+	t->playlist.items = _items;
 	t->playlist.len = len;
 	tui_draw(t);
+	return 0;
 }
 
 
@@ -251,10 +272,10 @@ tui_playlist_play(Tui *t)
 
 	const int act_idx = t->playlist.active;
 	if (act_idx >= 0)
-		t->playlist.items[act_idx]->now_playing = 0;
+		t->playlist.items[act_idx].now_playing = 0;
 
 	const int sel_idx = t->playlist.curr + t->playlist.top;
-	t->playlist.items[sel_idx]->now_playing = 1;
+	t->playlist.items[sel_idx].now_playing = 1;
 	t->playlist.active = sel_idx;
 	t->playlist.state = PLAYER_STATE_PLAYING;
 	t->playlist.duration = 0;
@@ -314,8 +335,8 @@ tui_playlist_next(Tui *t)
 	if ((idx < 0) || ((idx + 1) >= t->playlist.len))
 		return idx;
 
-	t->playlist.items[idx++]->now_playing = 0;
-	t->playlist.items[idx]->now_playing = 1;
+	t->playlist.items[idx++].now_playing = 0;
+	t->playlist.items[idx].now_playing = 1;
 	t->playlist.active = idx;
 
 	str_set_n(&t->str_buffer, NULL, 0);
@@ -336,8 +357,8 @@ tui_playlist_prev(Tui *t)
 	if ((idx < 0) || ((idx - 1) < 0))
 		return idx;
 
-	t->playlist.items[idx--]->now_playing = 0;
-	t->playlist.items[idx]->now_playing = 1;
+	t->playlist.items[idx--].now_playing = 0;
+	t->playlist.items[idx].now_playing = 1;
 	t->playlist.active = idx;
 
 	str_set_n(&t->str_buffer, NULL, 0);
@@ -421,8 +442,8 @@ _set_playlist(Tui *t, int idx, int pos)
 {
 	char buff[64];
 	Str *const str = &t->str_buffer;
-	TuiPlaylistItem *const playlist = t->playlist.items[idx];
-	PlayerItem *const item = &playlist->item;
+	TuiPlaylistItem *const playlist = &t->playlist.items[idx];
+	const PlaylistItem *const item = playlist->item;
 	const char *const duration = cstr_time_fmt(buff, sizeof(buff), item->duration);
 	const int dpos = t->width - (int)strlen(duration);
 
@@ -503,14 +524,14 @@ _set_footer(Tui *t)
 
 	char dur0[64];
 	char dur1[64];
-	const TuiPlaylistItem *const pl = t->playlist.items[t->playlist.active];
+	const TuiPlaylistItem *const pl = &t->playlist.items[t->playlist.active];
 	const char *const d0 = cstr_time_fmt(dur0, sizeof(dur0), t->playlist.duration);
-	const char *const d1 = cstr_time_fmt(dur1, sizeof(dur1), pl->item.duration);
+	const char *const d1 = cstr_time_fmt(dur1, sizeof(dur1), pl->item->duration);
 	const int dpos = t->width - snprintf(NULL, 0, "[%s - %s]", d0, d1);
 
 	str_append_fmt(str, "\x1b[%d;1H", t->footer_pos);
 	str_append_fmt(str, "\x1b[1;" CFG_FOOTER_COLOR_FG ";" CFG_FOOTER_COLOR_BG "m\x1b[K[%c] %d. %s",
-		       _player_state_chr[t->playlist.state], t->playlist.active + 1, pl->item.name);
+		       _player_state_chr[t->playlist.state], t->playlist.active + 1, pl->item->name);
 	str_append_fmt(str, "\x1b[%d;%dH [%s - %s]\x1b[m", t->footer_pos, dpos, d0, d1);
 }
 
@@ -529,8 +550,8 @@ _playlist_cursor(Tui *t, int step)
 	if (step > 0 && idx >= t->playlist.len - 1)
 		return;
 
-	t->playlist.items[idx]->is_selected = 0;
-	t->playlist.items[idx + step]->is_selected = 1;
+	t->playlist.items[idx].is_selected = 0;
+	t->playlist.items[idx + step].is_selected = 1;
 	t->playlist.curr += step;
 
 	str_set_n(&t->str_buffer, NULL, 0);
@@ -544,8 +565,8 @@ static void
 _playlist_scroll(Tui *t, int step)
 {
 	const int idx = t->playlist.curr + t->playlist.top;
-	t->playlist.items[idx]->is_selected = 0;
-	t->playlist.items[idx + step]->is_selected = 1;
+	t->playlist.items[idx].is_selected = 0;
+	t->playlist.items[idx + step].is_selected = 1;
 	t->playlist.top += step;
 
 	str_set_n(&t->str_buffer, NULL, 0);
