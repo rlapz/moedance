@@ -17,6 +17,10 @@
 #include "config.h"
 
 
+static const char *_allowed_file_types[] = CFG_FILE_TYPES;
+
+
+static int                  _verify(const char *name);
 static int                  _item_new(PlaylistItem **new_item, const char path[], int path_len);
 static int                  _sort_dir_cb(const struct dirent **a, const struct dirent **b);
 static void                 _load_files(Str *str, ArrayPtr *file_arr, const char path[], int max_depth);
@@ -61,26 +65,32 @@ playlist_deinit(Playlist *p)
  * private
  */
 static int
+_verify(const char *name)
+{
+	const char *ext = strrchr(name, '.');
+	if (ext == NULL)
+		return -1;
+
+	ext++;
+	if (*ext == '\0')
+		return -1;
+
+	for (size_t i = 0; i < LEN(_allowed_file_types); i++) {
+		if (strcasecmp(ext, _allowed_file_types[i]) == 0)
+			return 0;
+	}
+
+	return -1;
+}
+
+
+static int
 _item_new(PlaylistItem **new_item, const char path[], int path_len)
 {
-	int ret = -1;
-	const int fd = open(path, O_RDONLY);
-	if (fd < 0) {
-		log_err(errno, "playlist: _item_new: open: \"%s\"", path);
-		return -1;
-	}
-
-	struct stat st;
-	if (fstat(fd, &st) < 0) {
-		log_err(errno, "playlist: _item_new: fstat: \"%s\"", path);
-		goto out0;
-	}
-
 	PlaylistItem *const item = malloc(sizeof(PlaylistItem) + ((size_t)path_len + 1));
 	if (item == NULL) {
 		log_err(errno, "playlist: _item_new: item: malloc: \"%s\"", path);
-		free(item);
-		goto out0;
+		return 0;
 	}
 
 	memcpy(item->file_path, path, (size_t)path_len);
@@ -96,13 +106,11 @@ _item_new(PlaylistItem **new_item, const char path[], int path_len)
 		item->name = item->file_path;
 #endif
 
+	/* TODO: get file duration */
+
 	item->duration = 0;
 	*new_item = item;
-	ret = 0;
-
-out0:
-	close(fd);
-	return ret;
+	return 0;
 }
 
 
@@ -168,6 +176,9 @@ _load_files(Str *str, ArrayPtr *file_arr, const char path[], int max_depth)
 
 			break;
 		case S_IFREG:
+			if (_verify(str->cstr) < 0)
+				break;
+
 			if (_item_new(&new_item, str->cstr, (int)str->len) < 0)
 				break;
 

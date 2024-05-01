@@ -27,7 +27,7 @@ static void _draw_end(Tui *t);
 static void _clear(void);
 static void _resize(Tui *t);
 static int  _raw_mode(Tui *t);
-static void _set_playlist(Tui *t, int idx, int pos);
+static void _add_playlist_item(Tui *t, int idx, int pos);
 static void _set_header(Tui *t);
 static void _set_body(Tui *t);
 static void _set_footer(Tui *t);
@@ -494,7 +494,7 @@ _raw_mode(Tui *t)
 
 
 static void
-_set_playlist(Tui *t, int idx, int pos)
+_add_playlist_item(Tui *t, int idx, int pos)
 {
 	char buff[64];
 	Str *const str = &t->str_buffer;
@@ -546,7 +546,7 @@ _set_body(Tui *t)
 
 	int pos = 0;
 	for (int i = t->playlist.top; i < len; i++)
-		_set_playlist(t, i, pos++);
+		_add_playlist_item(t, i, pos++);
 }
 
 

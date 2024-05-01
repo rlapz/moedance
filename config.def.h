@@ -6,6 +6,19 @@
 #define CFG_PLAYLIST_SHOW_FULL_PATH (0)
 
 
+/* allowed file types */
+#define CFG_FILE_TYPES		\
+{				\
+	"mp3",			\
+	"flac",			\
+	"wav",			\
+	"m4a",			\
+	/* "mp4", */			\
+	/* "aac", */			\
+	/* "amr", */			\
+}
+
+
 /*
  * colors
  * see: https://en.wikipedia.org/wiki/ANSI_escape_code
@@ -24,7 +37,7 @@
 #define CFG_FOOTER_COLOR_BG   "45"
 
 
-#define CFG_DIR_RECURSIVE_SIZE (20)
+#define CFG_DIR_RECURSIVE_SIZE (8)
 #define CFG_LOG_FILE           "/tmp/moedance.log"
 
 
