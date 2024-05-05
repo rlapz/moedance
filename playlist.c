@@ -10,6 +10,9 @@
 #include <signal.h>
 #include <unistd.h>
 
+#include <libavformat/avformat.h>
+#include <libavutil/log.h>
+
 #include <sys/stat.h>
 
 #include "playlist.h"
@@ -35,6 +38,7 @@ playlist_init(Playlist *p)
 {
 	p->items = NULL;
 	p->items_len = 0;
+	av_log_set_level(AV_LOG_QUIET);
 }
 
 
@@ -87,6 +91,22 @@ _verify(const char *name)
 static int
 _item_new(PlaylistItem **new_item, const char path[], int path_len)
 {
+	AVFormatContext *ctx = NULL;
+	if (avformat_open_input(&ctx, path, NULL, NULL) < 0) {
+		log_err(0, "playlist: _item_new: avformat_open_input: failed");
+		return -1;
+	}
+
+	if (avformat_find_stream_info(ctx, NULL) < 0) {
+		log_err(0, "playlist: _item_new: avformat_find_stream: failed");
+		avformat_close_input(&ctx);
+		return -1;
+	}
+
+	const int64_t duration = ctx->duration / AV_TIME_BASE;
+	avformat_close_input(&ctx);
+
+
 	PlaylistItem *const item = malloc(sizeof(PlaylistItem) + ((size_t)path_len + 1));
 	if (item == NULL) {
 		log_err(errno, "playlist: _item_new: item: malloc: \"%s\"", path);
@@ -106,9 +126,7 @@ _item_new(PlaylistItem **new_item, const char path[], int path_len)
 		item->name = item->file_path;
 #endif
 
-	/* TODO: get file duration */
-
-	item->duration = 0;
+	item->duration = duration;
 	*new_item = item;
 	return 0;
 }
@@ -124,7 +142,7 @@ _sort_dir_cb(const struct dirent **a, const struct dirent **b)
 static void
 _load_files(Str *str, ArrayPtr *file_arr, const char path[], int max_depth)
 {
-	int ret, num;
+	int num;
 	struct stat st;
 	struct dirent **list;
 	PlaylistItem *new_item;
@@ -138,8 +156,7 @@ _load_files(Str *str, ArrayPtr *file_arr, const char path[], int max_depth)
 
 	num = scandir(path, &list, NULL, _sort_dir_cb);
 	if (num < 0) {
-		ret = -errno;
-		log_err(ret, "playlist: _load_files: scandir: %s", path);
+		log_err(errno, "playlist: _load_files: scandir: %s", path);
 		return;
 	}
 
@@ -168,8 +185,7 @@ _load_files(Str *str, ArrayPtr *file_arr, const char path[], int max_depth)
 				break;
 			}
 
-			ret = array_ptr_append(&dir_arr, dir_name);
-			if (ret < 0) {
+			if (array_ptr_append(&dir_arr, dir_name) < 0) {
 				log_err(errno, "playlist: _load_files: array_ptr_append: %s", dir_name);
 				free(dir_name);
 			}
@@ -182,9 +198,8 @@ _load_files(Str *str, ArrayPtr *file_arr, const char path[], int max_depth)
 			if (_item_new(&new_item, str->cstr, (int)str->len) < 0)
 				break;
 
-			ret = array_ptr_append(file_arr, new_item);
-			if (ret < 0) {
-				log_err(ret, "playlist: _load_files: array_ptr_append: %s", str->cstr);
+			if (array_ptr_append(file_arr, new_item) < 0) {
+				log_err(errno, "playlist: _load_files: array_ptr_append: %s", str->cstr);
 				free(new_item);
 			}
 
