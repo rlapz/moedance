@@ -224,19 +224,34 @@ _event_handle_kbd(MoeDance *m, int fd)
 static void
 _event_handle_kbd_escape(MoeDance *m, const char keys[], int len)
 {
-	if ((len <= 0) || (keys[0] != '['))
+	if (len <= 1)
 		return;
 
-	if ((len == 3) && (keys[2] != '~'))
+	char key = '\0';
+	const char key0 = (keys[0] == 'O')? '[' : keys[0];
+	if (key0 != '[')
 		return;
 
-	char key;
-	switch (keys[1]) {
-	case 'A': key = 'k'; break;
-	case 'B': key = 'j'; break;
-	case '5': key = ('u' & 0x1f); break;	/* page up */
-	case '6': key = ('d' & 0x1f); break;	/* page down */
-	default: return;
+	const char key1 = keys[1];
+	if ((key1 >= '0') && (key1 <= '9')) {
+		if ((len < 2) || (keys[2] != '~'))
+			return;
+
+		switch (key1) {
+		case '1':
+		case '7': key = 'g'; SET(m->flags, _FLAG_PLAYLIST_TOP); break;
+		case '8':
+		case '4': key = 'G'; break;
+		case '5': key = ('u' & 0x1f); break;	/* page up */
+		case '6': key = ('d' & 0x1f); break;	/* page down */
+		}
+	} else {
+		switch (key1) {
+		case 'A': key = 'k'; break;
+		case 'B': key = 'j'; break;
+		case 'H': key = 'g'; SET(m->flags, _FLAG_PLAYLIST_TOP); break;
+		case 'F': key = 'G'; break;
+		}
 	}
 
 	_event_handle_kbd_normal(m, key);
