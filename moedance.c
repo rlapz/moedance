@@ -9,6 +9,8 @@
 #include <strings.h>
 #include <signal.h>
 
+#include <libavutil/log.h>
+
 #include <sys/stat.h>
 #include <sys/signalfd.h>
 
@@ -55,6 +57,8 @@ moedance_init(MoeDance *m, const char root_dir[])
 	m->root_dir = root_dir;
 	m->poll_fds[MOEDANCE_FD_KBD].fd = STDIN_FILENO;
 	m->poll_fds[MOEDANCE_FD_KBD].events = POLLIN;
+
+	av_log_set_level(AV_LOG_QUIET);
 
 	playlist_init(&m->playlist);
 }

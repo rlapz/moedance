@@ -8,6 +8,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <pthread.h>
 
 #include "util.h"
 
@@ -397,6 +398,7 @@ array_ptr_append(ArrayPtr *a, void *item)
  * Log
  */
 static FILE *_log_file_out = NULL;
+static pthread_mutex_t _log_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 
 static inline const char *
@@ -468,6 +470,8 @@ log_err(int errnum, const char fmt[], ...)
 	if ((size_t)ret >= LEN(buffer))
 		buffer[LEN(buffer) - 1] = '\0';
 
+	pthread_mutex_lock(&_log_mutex); /* LOCK */
+
 	const char *const dt_now = _log_datetime_now(datetm, LEN(datetm));
 	if (out == NULL)
 		out = stderr;
@@ -478,6 +482,7 @@ log_err(int errnum, const char fmt[], ...)
 		fprintf(out, "ERROR: [%s]: %s\n", dt_now, buffer);
 
 	fflush(out);
+	pthread_mutex_unlock(&_log_mutex); /* UNLOCK */
 }
 
 
@@ -501,9 +506,12 @@ log_info(const char fmt[], ...)
 	if ((size_t)ret >= LEN(buffer))
 		buffer[LEN(buffer) - 1] = '\0';
 
+	pthread_mutex_lock(&_log_mutex); /* LOCK */
+
 	const char *const dt_now = _log_datetime_now(datetm, LEN(datetm));
 	fprintf((out == NULL)? stdout:out, "INFO: [%s]: %s\n", dt_now, buffer);
 
 	fflush(out);
+	pthread_mutex_unlock(&_log_mutex); /* UNLOCK */
 }
 

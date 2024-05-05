@@ -11,7 +11,6 @@
 #include <unistd.h>
 
 #include <libavformat/avformat.h>
-#include <libavutil/log.h>
 
 #include <sys/stat.h>
 
@@ -30,6 +29,7 @@ static void                 _load_files(Str *str, ArrayPtr *file_arr, const char
 static const PlaylistItem **_load_files_recurse(Playlist *p, int max_depth, int *len);
 
 
+
 /*
  * public
  */
@@ -38,7 +38,6 @@ playlist_init(Playlist *p)
 {
 	p->items = NULL;
 	p->items_len = 0;
-	av_log_set_level(AV_LOG_QUIET);
 }
 
 
