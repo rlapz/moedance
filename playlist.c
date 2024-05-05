@@ -92,13 +92,15 @@ static int
 _item_new(PlaylistItem **new_item, const char path[], int path_len)
 {
 	AVFormatContext *ctx = NULL;
-	if (avformat_open_input(&ctx, path, NULL, NULL) < 0) {
-		log_err(0, "playlist: _item_new: avformat_open_input: failed");
+	int ret = avformat_open_input(&ctx, path, NULL, NULL);
+	if (ret < 0) {
+		log_err(0, "playlist: _item_new: avformat_open_input: \"%s\": %s", path, av_err2str(ret));
 		return -1;
 	}
 
-	if (avformat_find_stream_info(ctx, NULL) < 0) {
-		log_err(0, "playlist: _item_new: avformat_find_stream: failed");
+	ret = avformat_find_stream_info(ctx, NULL);
+	if (ret < 0) {
+		log_err(0, "playlist: _item_new: avformat_find_stream_info: \"%s\": %s", path, av_err2str(ret));
 		avformat_close_input(&ctx);
 		return -1;
 	}
@@ -110,7 +112,7 @@ _item_new(PlaylistItem **new_item, const char path[], int path_len)
 	PlaylistItem *const item = malloc(sizeof(PlaylistItem) + ((size_t)path_len + 1));
 	if (item == NULL) {
 		log_err(errno, "playlist: _item_new: item: malloc: \"%s\"", path);
-		return 0;
+		return -1;
 	}
 
 	memcpy(item->file_path, path, (size_t)path_len);
