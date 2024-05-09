@@ -8,6 +8,7 @@
 #include <string.h>
 #include <strings.h>
 #include <signal.h>
+#include <pthread.h>
 
 #include <libavutil/log.h>
 
@@ -22,21 +23,24 @@
 
 
 enum {
-	_FLAG_ALIVE        = (1 << 0),
-	_FLAG_READY        = (1 << 1),
-	_FLAG_QUIT         = (1 << 2),
-	_FLAG_PLAYLIST_TOP = (1 << 3),
+	_FLAG_ALIVE            = (1 << 0),
+	_FLAG_READY            = (1 << 1),
+	_FLAG_TUI_READY        = (1 << 2),
+	_FLAG_KEY_QUIT         = (1 << 3),
+	_FLAG_KEY_PLAYLIST_TOP = (1 << 4),
 };
 
 
+static int  _set_signal_handler(void);
+static void _signal_handler(int sig);
+
 static void _set_playlist(MoeDance *m);
 
-static int  _set_signal_handler(MoeDance *m);
 static int  _event_loop(MoeDance *m);
 static void _event_handle_kbd(MoeDance *m, int fd);
-static void _event_handle_kbd_escape(MoeDance *m, const char keys[], int len);
+static void _event_handle_kbd_special(MoeDance *m, const char keys[], int len);
+static int  _event_handle_kbd_flags(MoeDance *m, char key);
 static void _event_handle_kbd_normal(MoeDance *m, char key);
-static void _event_handle_signal(MoeDance *m, int fd);
 
 static void _tui_quit_dialog(MoeDance *m);
 
@@ -46,6 +50,13 @@ static void _kbd_handle_key_toggle_play(MoeDance *m);
 static void _kbd_handle_key_next(MoeDance *m);
 static void _kbd_handle_key_prev(MoeDance *m);
 
+static void _on_player_begin(void *udata);
+static void _on_player_end(void *udata);
+static void _on_player_duration(void *udata);
+
+
+static MoeDance *moedance = NULL;
+
 
 /*
  * public
@@ -54,13 +65,14 @@ void
 moedance_init(MoeDance *m, const char root_dir[])
 {
 	m->flags = 0;
-	m->root_dir = root_dir;
-	m->poll_fds[MOEDANCE_FD_KBD].fd = STDIN_FILENO;
-	m->poll_fds[MOEDANCE_FD_KBD].events = POLLIN;
-
-	av_log_set_level(AV_LOG_QUIET);
+	cstr_copy(m->root_dir, root_dir);
 
 	playlist_init(&m->playlist);
+
+	pthread_mutex_init(&m->mutex, NULL);
+
+	av_log_set_level(AV_LOG_QUIET);
+	moedance = m;
 }
 
 
@@ -68,6 +80,7 @@ void
 moedance_deinit(MoeDance *m)
 {
 	playlist_deinit(&m->playlist);
+	pthread_mutex_destroy(&m->mutex);
 }
 
 
@@ -76,23 +89,34 @@ moedance_run(MoeDance *m)
 {
 	log_file_init(CFG_LOG_FILE);
 
-	int ret = player_init(&m->player);
+	int ret = tui_init(&m->tui, m->root_dir);
 	if (ret < 0)
 		goto out0;
 
-	ret = tui_init(&m->tui, m->root_dir);
+	ret = player_init(&m->player, _on_player_begin, _on_player_end, _on_player_duration, m);
 	if (ret < 0)
 		goto out1;
 
-	tui_draw(&m->tui);
+	ret = _set_signal_handler();
+	if (ret < 0)
+		goto out2;
 
+	ret = player_run(&m->player);
+	if (ret < 0)
+		goto out2;
+
+	tui_draw(&m->tui);
 	_set_playlist(m);
 
+	SET(m->flags, _FLAG_TUI_READY);
 	ret = _event_loop(m);
-	tui_deinit(&m->tui);
+	UNSET(m->flags, _FLAG_TUI_READY);
 
-out1:
+out2:
+	player_stop(&m->player);
 	player_deinit(&m->player);
+out1:
+	tui_deinit(&m->tui);
 out0:
 	log_file_deinit();
 	return ret;
@@ -102,6 +126,65 @@ out0:
 /*
  * private
  */
+static int
+_set_signal_handler(void)
+{
+	struct sigaction act;
+	sigemptyset(&act.sa_mask);
+	act.sa_flags = 0;
+	act.sa_handler = _signal_handler;
+
+	if (sigaction(SIGWINCH, &act, NULL) < 0) {
+		log_err(errno, "moedance: _set_signal_handler: sigaction: SIGWINCH");
+		return -1;
+	}
+
+	if (sigaction(SIGHUP, &act, NULL) < 0) {
+		log_err(errno, "moedance: _set_signal_handler: sigaction: SIGHUP");
+		return -1;
+	}
+
+	if (sigaction(SIGQUIT, &act, NULL) < 0) {
+		log_err(errno, "moedance: _set_signal_handler: sigaction: SIGQUIT");
+		return -1;
+	}
+
+	if (sigaction(SIGINT, &act, NULL) < 0) {
+		log_err(errno, "moedance: _set_signal_handler: sigaction: SIGINT");
+		return -1;
+	}
+
+	if (sigaction(SIGTERM, &act, NULL) < 0) {
+		log_err(errno, "moedance: _set_signal_handler: sigaction: SIGTERM");
+		return -1;
+	}
+
+	return 0;
+}
+
+
+static void
+_signal_handler(int sig)
+{
+	switch (sig) {
+	case SIGWINCH:
+		tui_draw(&moedance->tui);
+		if (CHECK(moedance->flags, _FLAG_KEY_QUIT))
+			_tui_quit_dialog(moedance);
+		break;
+	case SIGHUP:
+	case SIGINT:
+	case SIGQUIT:
+	case SIGTERM:
+		UNSET(moedance->flags, _FLAG_ALIVE);
+		break;
+	default:
+		log_err(0, "moedance: _event_handle_signal: invalid signal: %d", sig);
+		break;
+	}
+}
+
+
 static void
 _set_playlist(MoeDance *m)
 {
@@ -117,90 +200,48 @@ _set_playlist(MoeDance *m)
 
 
 static int
-_set_signal_handler(MoeDance *m)
-{
-	int ret;
-	sigset_t sigmask;
-
-
-	sigemptyset(&sigmask);
-	sigaddset(&sigmask, SIGWINCH);
-	sigaddset(&sigmask, SIGHUP);
-	sigaddset(&sigmask, SIGQUIT);
-	sigaddset(&sigmask, SIGINT);
-	sigaddset(&sigmask, SIGTERM);
-
-	ret = sigprocmask(SIG_BLOCK, &sigmask, NULL);
-	if (ret < 0) {
-		log_err(errno, "moedance: _set_signal_handler: sigprocmask");
-		return -1;
-	}
-
-	const int sigfd = signalfd(-1, &sigmask, SFD_NONBLOCK);
-	if (sigfd < 0) {
-		log_err(errno, "moedance: _set_signal_handler: signalfd");
-		return -1;
-	}
-
-	m->poll_fds[MOEDANCE_FD_SIGNAL].fd = sigfd;
-	m->poll_fds[MOEDANCE_FD_SIGNAL].events = POLLIN;
-	return 0;
-}
-
-
-static int
 _event_loop(MoeDance *m)
 {
-	int ret = _set_signal_handler(m);
-	if (ret < 0)
-		return -1;
+	struct pollfd pfds = {
+		.fd = STDIN_FILENO,
+		.events = POLLIN,
+	};
 
 	SET(m->flags, (_FLAG_ALIVE | _FLAG_READY));
-
-	struct pollfd *const pfds = m->poll_fds;
 	while (CHECK(m->flags, _FLAG_ALIVE)) {
-		ret = poll(pfds, __MOEDANCE_FD_SIZE, 100);
+		int ret = poll(&pfds, 1, -1);
 		if (ret < 0) {
-			log_err(errno, "moedance: _event_loop: poll");
-			goto out0;
-		}
-
-		for (int i = 0; i < __MOEDANCE_FD_SIZE; i++) {
-			const short int rv = pfds[i].revents;
-			if (CHECK(rv, POLLHUP) || CHECK(rv, POLLERR)) {
-				UNSET(m->flags, _FLAG_ALIVE);
-
-				const char *revents_str = "";
-				if (CHECK(rv, POLLHUP))
-					revents_str = "POLLHUP";
-				else if (CHECK(rv, POLLERR))
-					revents_str = "POLLERR";
-
-				log_info("moedance; _event_loop: revents: %s", revents_str);
-				break;
-			}
-
-			if (CHECK(rv, POLLIN) == 0)
+			if (errno == EINTR)
 				continue;
 
-			switch (i) {
-			case MOEDANCE_FD_KBD:
-				_event_handle_kbd(m, pfds[i].fd);
-				break;
-			case MOEDANCE_FD_SIGNAL:
-				_event_handle_signal(m, pfds[i].fd);
-				break;
-			default:
-				log_err(0, "moedance: _event_loop: invalid event: %d", i);
-				UNSET(m->flags, _FLAG_ALIVE);
-				ret = -1;
-			}
+			log_err(errno, "moedance: _event_loop: poll");
+			UNSET(m->flags, _FLAG_ALIVE);
+			return -1;
 		}
+
+		if (ret == 0)
+			continue;
+
+		const short int rv = pfds.revents;
+		if (CHECK(rv, POLLHUP) || CHECK(rv, POLLERR)) {
+			const char *revents_str = "";
+			if (CHECK(rv, POLLHUP))
+				revents_str = "POLLHUP";
+			else if (CHECK(rv, POLLERR))
+				revents_str = "POLLERR";
+
+			log_info("moedance; _event_loop: revents: %s", revents_str);
+			UNSET(m->flags, _FLAG_ALIVE);
+			return -1;
+		}
+
+		if (CHECK(rv, POLLIN) == 0)
+			continue;
+
+		_event_handle_kbd(m, pfds.fd);
 	}
 
-out0:
-	close(m->poll_fds[MOEDANCE_FD_SIGNAL].fd);
-	return ret;
+	return 0;
 }
 
 
@@ -214,15 +255,18 @@ _event_handle_kbd(MoeDance *m, int fd)
 		return;
 	}
 
+	if (CHECK(m->flags, _FLAG_READY) == 0)
+		return;
+
 	if (buffer[0] == '\x1b')
-		_event_handle_kbd_escape(m, &buffer[1], (int)rd - 1);
+		_event_handle_kbd_special(m, &buffer[1], (int)rd - 1);
 	else
 		_event_handle_kbd_normal(m, buffer[0]);
 }
 
 
 static void
-_event_handle_kbd_escape(MoeDance *m, const char keys[], int len)
+_event_handle_kbd_special(MoeDance *m, const char keys[], int len)
 {
 	if (len <= 1)
 		return;
@@ -239,7 +283,7 @@ _event_handle_kbd_escape(MoeDance *m, const char keys[], int len)
 
 		switch (key1) {
 		case '1':
-		case '7': key = 'g'; SET(m->flags, _FLAG_PLAYLIST_TOP); break;
+		case '7': key = 'g'; SET(m->flags, _FLAG_KEY_PLAYLIST_TOP); break;
 		case '8':
 		case '4': key = 'G'; break;
 		case '5': key = ('u' & 0x1f); break;	/* page up */
@@ -249,7 +293,7 @@ _event_handle_kbd_escape(MoeDance *m, const char keys[], int len)
 		switch (key1) {
 		case 'A': key = 'k'; break;
 		case 'B': key = 'j'; break;
-		case 'H': key = 'g'; SET(m->flags, _FLAG_PLAYLIST_TOP); break;
+		case 'H': key = 'g'; SET(m->flags, _FLAG_KEY_PLAYLIST_TOP); break;
 		case 'F': key = 'G'; break;
 		}
 	}
@@ -258,76 +302,52 @@ _event_handle_kbd_escape(MoeDance *m, const char keys[], int len)
 }
 
 
+static inline int
+_event_handle_kbd_flags(MoeDance *m, char key)
+{
+	if (CHECK(m->flags, _FLAG_KEY_QUIT)) {
+		if (tolower(key) == 'y') {
+			UNSET(m->flags, _FLAG_ALIVE);
+			return -1;
+		}
+
+		UNSET(m->flags, _FLAG_KEY_QUIT);
+		player_item_stop(&m->player);
+		tui_show_dialog(&m->tui, NULL);
+	} else if (CHECK(m->flags, _FLAG_KEY_PLAYLIST_TOP)) {
+		UNSET(m->flags, _FLAG_KEY_PLAYLIST_TOP);
+		if (key == 'g') {
+			tui_playlist_top(&m->tui);
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
+
 static void
 _event_handle_kbd_normal(MoeDance *m, char key)
 {
-	if (CHECK(m->flags, _FLAG_READY) == 0)
+	if (_event_handle_kbd_flags(m, key) < 0)
 		return;
-
-	if (CHECK(m->flags, _FLAG_QUIT)) {
-		if (tolower(key) == 'y') {
-			UNSET(m->flags, _FLAG_ALIVE);
-			return;
-		}
-
-		UNSET(m->flags, _FLAG_QUIT);
-		player_stop(&m->player);
-		tui_show_dialog(&m->tui, NULL);
-		return;
-	}
-
-	if (CHECK(m->flags, _FLAG_PLAYLIST_TOP)) {
-		UNSET(m->flags, _FLAG_PLAYLIST_TOP);
-		if (key == 'g') {
-			tui_playlist_top(&m->tui);
-			return;
-		}
-	}
 
 	switch (key) {
 	case 'q':
-		SET(m->flags, _FLAG_QUIT);
+		SET(m->flags, _FLAG_KEY_QUIT);
 		_tui_quit_dialog(m);
 		break;
 	case CTRL_KEY('u'): tui_playlist_page_up(&m->tui); break;
 	case CTRL_KEY('d'): tui_playlist_page_down(&m->tui); break;
 	case 'k': tui_playlist_cursor_up(&m->tui); break;
 	case 'j': tui_playlist_cursor_down(&m->tui); break;
-	case 'g': SET(m->flags, _FLAG_PLAYLIST_TOP); break;
+	case 'g': SET(m->flags, _FLAG_KEY_PLAYLIST_TOP); break;
 	case 'G': tui_playlist_bottom(&m->tui); break;
 	case 's': _kbd_handle_key_stop(m); break;
 	case 13:  _kbd_handle_key_enter(m); break;
 	case ' ': _kbd_handle_key_toggle_play(m); break;
 	case 'n': _kbd_handle_key_next(m); break;
 	case 'p': _kbd_handle_key_prev(m); break;
-	}
-}
-
-
-static void
-_event_handle_signal(MoeDance *m, int fd)
-{
-	struct signalfd_siginfo siginfo;
-	if (read(fd, &siginfo, sizeof(siginfo)) < 0) {
-		log_err(errno, "moedance: _event_handle_signal: read");
-		siginfo.ssi_signo = SIGWINCH;
-	}
-
-	switch (siginfo.ssi_signo) {
-	case SIGWINCH:
-		tui_draw(&m->tui);
-		if (CHECK(m->flags, _FLAG_QUIT))
-			_tui_quit_dialog(m);
-		break;
-	case SIGHUP:
-	case SIGINT:
-	case SIGQUIT:
-	case SIGTERM:
-		UNSET(m->flags, _FLAG_ALIVE);
-		break;
-	default:
-		log_err(0, "moedance: _event_handle_signal: invalid signal");
-		break;
 	}
 }
 
@@ -380,5 +400,40 @@ _kbd_handle_key_prev(MoeDance *m)
 	const PlaylistItem *const item = tui_playlist_prev(&m->tui);
 	if (item != NULL)
 		log_info("prev: %s", item->name);
+}
+
+
+static void
+_on_player_begin(void *udata)
+{
+	MoeDance *const m = (MoeDance *)udata;
+	pthread_mutex_lock(&m->mutex); /* LOCK */
+	pthread_mutex_unlock(&m->mutex); /* UNLOCK */
+}
+
+
+static void
+_on_player_end(void *udata)
+{
+	MoeDance *const m = (MoeDance *)udata;
+	pthread_mutex_lock(&m->mutex); /* LOCK */
+	pthread_mutex_unlock(&m->mutex); /* UNLOCK */
+}
+
+
+static void
+_on_player_duration(void *udata)
+{
+	MoeDance *const m = (MoeDance *)udata;
+	pthread_mutex_lock(&m->mutex); /* LOCK */
+
+	if (CHECK(m->flags, _FLAG_TUI_READY | _FLAG_KEY_QUIT)) {
+		if (CHECK(m->flags, _FLAG_KEY_QUIT) == 0) {
+			const int64_t duration = m->tui.playlist.duration + 1;
+			tui_set_duration(&m->tui, duration);
+		}
+	}
+
+	pthread_mutex_unlock(&m->mutex); /* UNLOCK */
 }
 

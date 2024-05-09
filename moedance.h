@@ -4,26 +4,21 @@
 
 #include <stdint.h>
 #include <poll.h>
+#include <pthread.h>
 
 #include "tui.h"
 #include "player.h"
 #include "playlist.h"
 
 
-enum {
-	MOEDANCE_FD_KBD = 0,
-	MOEDANCE_FD_SIGNAL,
-
-	__MOEDANCE_FD_SIZE,
-};
-
 typedef struct {
-	int            flags;
-	const char    *root_dir;
-	Tui            tui;
-	Player         player;
-	Playlist       playlist;
-	struct pollfd  poll_fds[__MOEDANCE_FD_SIZE];
+	int      flags;
+	Tui      tui;
+	Player   player;
+	Playlist playlist;
+	char     root_dir[4096];
+
+	pthread_mutex_t mutex;
 } MoeDance;
 
 

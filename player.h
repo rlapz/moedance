@@ -3,6 +3,7 @@
 
 
 #include <stdint.h>
+#include <pthread.h>
 
 #include "playlist.h"
 #include "util.h"
@@ -15,18 +16,33 @@ enum {
 	PLAYER_STATE_UNKNOWN,
 };
 
+typedef void (*PlayerCallback)(void *udata);
+
 typedef struct {
+	int                 is_alive;
 	int                 state;
-	int64_t             playlist_item_duration;
 	const PlaylistItem *playlist_item;
+	int64_t             playlist_item_duration;
+
+	PlayerCallback      on_player_begin;
+	PlayerCallback      on_player_end;
+	PlayerCallback      on_player_duration;
+	void               *callback_udata;
+
+	pthread_mutex_t    mutex;
+	pthread_cond_t     condv;
 } Player;
 
 
-int  player_init(Player *p);
+int  player_init(Player *p, PlayerCallback on_player_begin, PlayerCallback on_player_end,
+		 PlayerCallback on_player_duration, void *callback_udata);
 void player_deinit(Player *p);
-int  player_play(Player *p, const PlaylistItem *item);
-void player_pause(Player *p);
+int  player_run(Player *p);
 void player_stop(Player *p);
+
+int  player_item_play(Player *p, const PlaylistItem *item);
+int  player_item_pause(Player *p);
+int  player_item_stop(Player *p);
 
 
 #endif

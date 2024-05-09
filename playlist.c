@@ -117,7 +117,7 @@ _item_new(PlaylistItem **new_item, const char path[], int path_len)
 	memcpy(item->file_path, path, (size_t)path_len);
 	item->file_path[path_len] = '\0';
 
-#if CFG_PLAYLIST_SHOW_FULL_PATH == 1
+#if (CFG_PLAYLIST_SHOW_FULL_PATH == 1)
 	item->name = item->file_path + 2;
 #else
 	const char *const name = strrchr(item->file_path, '/');
