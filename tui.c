@@ -573,10 +573,15 @@ _set_footer(Tui *t)
 	const char *const d0 = cstr_time_fmt(dur0, sizeof(dur0), t->playlist.duration);
 	const char *const d1 = cstr_time_fmt(dur1, sizeof(dur1), pl->item->duration);
 	const int dpos = t->width - snprintf(NULL, 0, "[%s - %s]", d0, d1);
+	const char *name = strrchr(pl->item->name, '/');
+	if (name != NULL)
+		name++;
+	else
+		name = pl->item->name;
 
 	str_append_fmt(str, "\x1b[%d;1H", t->footer_pos);
-	str_append_fmt(str, "\x1b[1;" CFG_FOOTER_COLOR_FG ";" CFG_FOOTER_COLOR_BG "m\x1b[K[%c] %d. %s",
-		       _player_state_chr[t->playlist.state], t->playlist.active + 1, pl->item->name);
+	str_append_fmt(str, "\x1b[1;" CFG_FOOTER_COLOR_FG ";" CFG_FOOTER_COLOR_BG "m\x1b[K│%c│ %d. %s",
+		       _player_state_chr[t->playlist.state], t->playlist.active + 1, name);
 	str_append_fmt(str, "\x1b[%d;%dH [%s - %s]\x1b[m", t->footer_pos, dpos, d0, d1);
 }
 

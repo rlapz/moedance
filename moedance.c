@@ -16,6 +16,7 @@
 #include <sys/signalfd.h>
 
 #include "moedance.h"
+#include "kbd.h"
 #include "config.h"
 
 
@@ -23,11 +24,10 @@
 
 
 enum {
-	_FLAG_ALIVE            = (1 << 0),
-	_FLAG_READY            = (1 << 1),
-	_FLAG_TUI_READY        = (1 << 2),
-	_FLAG_KEY_QUIT         = (1 << 3),
-	_FLAG_KEY_PLAYLIST_TOP = (1 << 4),
+	_FLAG_ALIVE     = (1 << 0),
+	_FLAG_READY     = (1 << 1),
+	_FLAG_TUI_READY = (1 << 2),
+	_FLAG_KEY_QUIT  = (1 << 3),
 };
 
 
@@ -38,9 +38,6 @@ static void _set_playlist(MoeDance *m);
 
 static int  _event_loop(MoeDance *m);
 static void _event_handle_kbd(MoeDance *m, int fd);
-static void _event_handle_kbd_special(MoeDance *m, const char keys[], int len);
-static int  _event_handle_kbd_flags(MoeDance *m, char key);
-static void _event_handle_kbd_normal(MoeDance *m, char key);
 
 static void _tui_quit_dialog(MoeDance *m);
 
@@ -97,11 +94,11 @@ moedance_run(MoeDance *m)
 	if (ret < 0)
 		goto out1;
 
-	ret = _set_signal_handler();
+	ret = player_run(&m->player);
 	if (ret < 0)
 		goto out2;
 
-	ret = player_run(&m->player);
+	ret = _set_signal_handler();
 	if (ret < 0)
 		goto out2;
 
@@ -134,10 +131,6 @@ _set_signal_handler(void)
 	act.sa_flags = 0;
 	act.sa_handler = _signal_handler;
 
-	if (sigaction(SIGWINCH, &act, NULL) < 0) {
-		log_err(errno, "moedance: _set_signal_handler: sigaction: SIGWINCH");
-		return -1;
-	}
 
 	if (sigaction(SIGHUP, &act, NULL) < 0) {
 		log_err(errno, "moedance: _set_signal_handler: sigaction: SIGHUP");
@@ -156,6 +149,11 @@ _set_signal_handler(void)
 
 	if (sigaction(SIGTERM, &act, NULL) < 0) {
 		log_err(errno, "moedance: _set_signal_handler: sigaction: SIGTERM");
+		return -1;
+	}
+
+	if (sigaction(SIGWINCH, &act, NULL) < 0) {
+		log_err(errno, "moedance: _set_signal_handler: sigaction: SIGWINCH");
 		return -1;
 	}
 
@@ -223,8 +221,8 @@ _event_loop(MoeDance *m)
 			continue;
 
 		const short int rv = pfds.revents;
-		if (CHECK(rv, POLLHUP) || CHECK(rv, POLLERR)) {
-			const char *revents_str = "";
+		if (CHECK(rv, POLLHUP | POLLERR)) {
+			const char *revents_str = "???";
 			if (CHECK(rv, POLLHUP))
 				revents_str = "POLLHUP";
 			else if (CHECK(rv, POLLERR))
@@ -241,6 +239,7 @@ _event_loop(MoeDance *m)
 		_event_handle_kbd(m, pfds.fd);
 	}
 
+	tui_show_dialog(&m->tui, "Please wait...");
 	return 0;
 }
 
@@ -258,97 +257,31 @@ _event_handle_kbd(MoeDance *m, int fd)
 	if (CHECK(m->flags, _FLAG_READY) == 0)
 		return;
 
-	if (buffer[0] == '\x1b')
-		_event_handle_kbd_special(m, &buffer[1], (int)rd - 1);
-	else
-		_event_handle_kbd_normal(m, buffer[0]);
-}
-
-
-static void
-_event_handle_kbd_special(MoeDance *m, const char keys[], int len)
-{
-	if (len <= 1)
-		return;
-
-	char key = '\0';
-	const char key0 = (keys[0] == 'O')? '[' : keys[0];
-	if (key0 != '[')
-		return;
-
-	const char key1 = keys[1];
-	if ((key1 >= '0') && (key1 <= '9')) {
-		if ((len < 2) || (keys[2] != '~'))
-			return;
-
-		switch (key1) {
-		case '1':
-		case '7': key = 'g'; SET(m->flags, _FLAG_KEY_PLAYLIST_TOP); break;
-		case '8':
-		case '4': key = 'G'; break;
-		case '5': key = ('u' & 0x1f); break;	/* page up */
-		case '6': key = ('d' & 0x1f); break;	/* page down */
-		}
-	} else {
-		switch (key1) {
-		case 'A': key = 'k'; break;
-		case 'B': key = 'j'; break;
-		case 'H': key = 'g'; SET(m->flags, _FLAG_KEY_PLAYLIST_TOP); break;
-		case 'F': key = 'G'; break;
-		}
-	}
-
-	_event_handle_kbd_normal(m, key);
-}
-
-
-static inline int
-_event_handle_kbd_flags(MoeDance *m, char key)
-{
-	if (CHECK(m->flags, _FLAG_KEY_QUIT)) {
-		if (tolower(key) == 'y') {
-			UNSET(m->flags, _FLAG_ALIVE);
-			return -1;
-		}
-
-		UNSET(m->flags, _FLAG_KEY_QUIT);
-		player_item_stop(&m->player);
-		tui_show_dialog(&m->tui, NULL);
-	} else if (CHECK(m->flags, _FLAG_KEY_PLAYLIST_TOP)) {
-		UNSET(m->flags, _FLAG_KEY_PLAYLIST_TOP);
-		if (key == 'g') {
-			tui_playlist_top(&m->tui);
-			return -1;
-		}
-	}
-
-	return 0;
-}
-
-
-static void
-_event_handle_kbd_normal(MoeDance *m, char key)
-{
-	if (_event_handle_kbd_flags(m, key) < 0)
-		return;
-
-	switch (key) {
-	case 'q':
+	const int kbd = kbd_parse(buffer, (int)rd);
+	switch (kbd) {
+	case KBD_ARROW_UP: tui_playlist_cursor_up(&m->tui); break;
+	case KBD_ARROW_DOWN: tui_playlist_cursor_down(&m->tui); break;
+	case KBD_HOME: tui_playlist_top(&m->tui); break;
+	case KBD_END: tui_playlist_bottom(&m->tui); break;
+	case KBD_PAGE_UP: tui_playlist_page_up(&m->tui); break;
+	case KBD_PAGE_DOWN: tui_playlist_page_down(&m->tui); break;
+	case KBD_SPACE: _kbd_handle_key_toggle_play(m); break;
+	case KBD_ENTER: _kbd_handle_key_enter(m); break;
+	case KBD_N: _kbd_handle_key_next(m); break;
+	case KBD_P: _kbd_handle_key_prev(m); break;
+	case KBD_S: _kbd_handle_key_stop(m); break;
+	case KBD_Q:
 		SET(m->flags, _FLAG_KEY_QUIT);
 		_tui_quit_dialog(m);
+		return;
+	case KBD_Y:
+		if (CHECK(m->flags, _FLAG_KEY_QUIT))
+			UNSET(m->flags, _FLAG_ALIVE);
+
 		break;
-	case CTRL_KEY('u'): tui_playlist_page_up(&m->tui); break;
-	case CTRL_KEY('d'): tui_playlist_page_down(&m->tui); break;
-	case 'k': tui_playlist_cursor_up(&m->tui); break;
-	case 'j': tui_playlist_cursor_down(&m->tui); break;
-	case 'g': SET(m->flags, _FLAG_KEY_PLAYLIST_TOP); break;
-	case 'G': tui_playlist_bottom(&m->tui); break;
-	case 's': _kbd_handle_key_stop(m); break;
-	case 13:  _kbd_handle_key_enter(m); break;
-	case ' ': _kbd_handle_key_toggle_play(m); break;
-	case 'n': _kbd_handle_key_next(m); break;
-	case 'p': _kbd_handle_key_prev(m); break;
 	}
+
+	UNSET(m->flags, _FLAG_KEY_QUIT);
 }
 
 
