@@ -178,8 +178,13 @@ _load_files(Str *str, ArrayPtr *file_arr, const char path[], int max_depth)
 		switch (st.st_mode & S_IFMT) {
 		case S_IFDIR:
 			/* be aware! */
-			if (max_depth == 0)
+			if (max_depth == 0) {
+				for (; i < num; i++)
+					free(list[i]);
+
+				free(list);
 				return;
+			}
 
 			dir_name = str_dup(str);
 			if (dir_name == NULL) {
