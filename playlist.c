@@ -171,6 +171,7 @@ _load_files(Str *str, ArrayPtr *file_arr, const char path[], int max_depth)
 
 		str_set_fmt(str, "%s/%s", path, name);
 		if (stat(str->cstr, &st) < 0) {
+			log_err(errno, "playlist: _load_files: stat: %s", str->cstr);
 			free(list[i]);
 			continue;
 		}
@@ -179,10 +180,12 @@ _load_files(Str *str, ArrayPtr *file_arr, const char path[], int max_depth)
 		case S_IFDIR:
 			/* be aware! */
 			if (max_depth == 0) {
+				log_err(0, "playlist: _load_files: %s: too deep!", str->cstr);
 				for (; i < num; i++)
 					free(list[i]);
 
 				free(list);
+				array_ptr_deinit(&dir_arr);
 				return;
 			}
 

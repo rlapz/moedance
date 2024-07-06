@@ -70,7 +70,7 @@ cstr_cmp_vers(const char a[], const char b[])
 		}
 	}
 
-	if (((l[dp] - '1') < 9) && ((r[dp] -'1') < 9)) {
+	if (((l[dp] - '1') < 9) && ((r[dp] - '1') < 9)) {
 		/* If we're looking at non-degenerate digit sequences starting
 		 * with nonzero digits, longest digit string is greater. */
 		for (j = i; isdigit(l[j]); j++) {
