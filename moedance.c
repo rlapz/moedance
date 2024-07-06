@@ -25,8 +25,9 @@
 enum {
 	_FLAG_ALIVE     = (1 << 0),
 	_FLAG_READY     = (1 << 1),
-	_FLAG_TUI_READY = (1 << 2),
-	_FLAG_KEY_QUIT  = (1 << 3),
+	_FLAG_LOADING   = (1 << 2),
+	_FLAG_TUI_READY = (1 << 3),
+	_FLAG_KEY_QUIT  = (1 << 4),
 };
 
 
@@ -39,6 +40,7 @@ static int  _event_loop(MoeDance *m);
 static void _event_handle_kbd(MoeDance *m, int fd);
 
 static void _tui_quit_dialog(MoeDance *m);
+static void _tui_loading_dialog(MoeDance *m);
 
 static void _kbd_handle_key_stop(MoeDance *m);
 static void _kbd_handle_key_enter(MoeDance *m);
@@ -168,6 +170,9 @@ _signal_handler(int sig)
 		tui_draw(&_moedance->tui);
 		if (ISSET(_moedance->flags, _FLAG_KEY_QUIT))
 			_tui_quit_dialog(_moedance);
+		else if (ISSET(_moedance->flags, _FLAG_LOADING))
+			_tui_loading_dialog(_moedance);
+
 		break;
 	case SIGHUP:
 	case SIGINT:
@@ -185,7 +190,8 @@ _signal_handler(int sig)
 static void
 _set_playlist(MoeDance *m)
 {
-	tui_show_dialog(&m->tui, "Loading...");
+	SET(m->flags, _FLAG_LOADING);
+	_tui_loading_dialog(m);
 
 	int items_len = 0;
 	const PlaylistItem **const items = playlist_load(&m->playlist, m->root_dir, &items_len);
@@ -193,6 +199,7 @@ _set_playlist(MoeDance *m)
 		tui_show_dialog(&m->tui, "Failed to load file(s) from the given root dir!");
 
 	tui_set_playlist(&m->tui, items, items_len);
+	UNSET(m->flags, _FLAG_LOADING);
 }
 
 
@@ -292,6 +299,13 @@ static void
 _tui_quit_dialog(MoeDance *m)
 {
 	tui_show_dialog(&m->tui, "Quit? (y)");
+}
+
+
+static void
+_tui_loading_dialog(MoeDance *m)
+{
+	tui_show_dialog(&m->tui, "Loading...");
 }
 
 
