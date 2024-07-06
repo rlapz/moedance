@@ -28,16 +28,16 @@ static int
 _handle_special(const char raw[], int len)
 {
 	if (len <= 1)
-		return KBD_OTHER;
+		return KBD_UNKNOWN;
 
 	const char key0 = (raw[0] == 'O')? '[' : raw[0];
 	if (key0 != '[')
-		return KBD_OTHER;
+		return KBD_UNKNOWN;
 
 	const char key1 = raw[1];
 	if ((key1 >= '0') && (key1 <= '9')) {
 		if ((len < 2) || (raw[2] != '~'))
-			return KBD_OTHER;
+			return KBD_UNKNOWN;
 
 		switch (key1) {
 		case '1':
@@ -56,7 +56,7 @@ _handle_special(const char raw[], int len)
 		}
 	}
 
-	return KBD_OTHER;
+	return KBD_UNKNOWN;
 }
 
 
@@ -64,21 +64,21 @@ static int
 _handle_normal(char key)
 {
 	switch (key) {
-	case 'q': return KBD_Q;
-	case CTRL_KEY('u'): return KBD_PAGE_UP;
-	case CTRL_KEY('d'): return KBD_PAGE_DOWN;
 	case 'k': return KBD_ARROW_UP;
 	case 'j': return KBD_ARROW_DOWN;
+	case CTRL_KEY('u'): return KBD_PAGE_UP;
+	case CTRL_KEY('d'): return KBD_PAGE_DOWN;
 	case 'g': return KBD_HOME;
 	case 'G': return KBD_END;
-	case 's': return KBD_S;
 	case 13: return KBD_ENTER;
 	case ' ': return KBD_SPACE;
 	case 'n': return KBD_N;
 	case 'p': return KBD_P;
+	case 'q': return KBD_Q;
+	case 's': return KBD_S;
 	case 'y': return KBD_Y;
 	}
 
-	return KBD_OTHER;
+	return KBD_UNKNOWN;
 }
 

@@ -118,6 +118,7 @@ _item_new(PlaylistItem **new_item, const char path[], int path_len)
 	item->file_path[path_len] = '\0';
 
 #if (CFG_PLAYLIST_SHOW_FULL_PATH == 1)
+	/* skip './' */
 	item->name = item->file_path + 2;
 #else
 	const char *const name = strrchr(item->file_path, '/');
@@ -227,11 +228,10 @@ static const PlaylistItem **
 _load_files_recurse(Playlist *p, int max_depth, int *len)
 {
 	Str str;
-	ArrayPtr arr;
 	char buffer[4096];
-
-
 	str_init(&str, buffer, sizeof(buffer));
+
+	ArrayPtr arr;
 	array_ptr_init(&arr);
 
 	_load_files(&str, &arr, ".", max_depth);

@@ -10,14 +10,13 @@
 #define LEN(X)      (sizeof(X) / sizeof(*X))
 #define SET(X, F)   (X |= (F))
 #define UNSET(X, F) (X &= ~(F))
-#define CHECK(X, F) (X & (F))
+#define ISSET(X, F) (X & (F))
 
 
 /*
  * cstr
  */
 void  cstr_copy(char dest[], const char src[]);
-//char *cstr_copy_s(char dest[], size_t size, const char src[]);
 char *cstr_time_fmt(char dest[], size_t size, int64_t secs);
 int   cstr_cmp_vers(const char a[], const char b[]);
 
@@ -25,32 +24,31 @@ int   cstr_cmp_vers(const char a[], const char b[]);
 /*
  * Str
  */
-typedef struct str {
+typedef struct {
 	int     is_alloc;
 	char   *cstr;
 	size_t  size;
 	size_t  len;
 } Str;
 
-int   str_init(Str *s, char buffer[], size_t size);
-int   str_init_alloc(Str *s, size_t len);
-void  str_deinit(Str *s);
-char *str_set(Str *s, const char cstr[]);
-char *str_set_n(Str *s, const char cstr[], size_t len);
-char *str_set_fmt(Str *s, const char fmt[], ...);
-char *str_append(Str *s, const char cstr[]);
-char *str_append_n(Str *s, const char cstr[], size_t len);
-char *str_append_fmt(Str *s, const char fmt[], ...);
-char *str_dup(Str *s);
-int   str_write_all(Str *s, int fd);
+int         str_init(Str *s, char buffer[], size_t size);
+int         str_init_alloc(Str *s, size_t len);
+void        str_deinit(Str *s);
+const char *str_set(Str *s, const char cstr[]);
+const char *str_set_n(Str *s, const char cstr[], size_t len);
+const char *str_set_fmt(Str *s, const char fmt[], ...);
+const char *str_append(Str *s, const char cstr[]);
+const char *str_append_n(Str *s, const char cstr[], size_t len);
+const char *str_append_fmt(Str *s, const char fmt[], ...);
+char       *str_dup(Str *s);
 
 
 /*
  * ArrayPtr
  */
 typedef struct {
-	size_t      len;
-	uintptr_t **items;
+	size_t   len;
+	void   **items;
 } ArrayPtr;
 
 void array_ptr_init(ArrayPtr *a);

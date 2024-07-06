@@ -13,7 +13,6 @@
 #include <libavutil/log.h>
 
 #include <sys/stat.h>
-#include <sys/signalfd.h>
 
 #include "moedance.h"
 #include "kbd.h"
@@ -52,7 +51,7 @@ static void _on_player_end(void *udata);
 static void _on_player_duration(void *udata);
 
 
-static MoeDance *moedance = NULL;
+static MoeDance *_moedance = NULL;
 
 
 /*
@@ -69,7 +68,7 @@ moedance_init(MoeDance *m, const char root_dir[])
 	pthread_mutex_init(&m->mutex, NULL);
 
 	av_log_set_level(AV_LOG_QUIET);
-	moedance = m;
+	_moedance = m;
 }
 
 
@@ -166,15 +165,15 @@ _signal_handler(int sig)
 {
 	switch (sig) {
 	case SIGWINCH:
-		tui_draw(&moedance->tui);
-		if (CHECK(moedance->flags, _FLAG_KEY_QUIT))
-			_tui_quit_dialog(moedance);
+		tui_draw(&_moedance->tui);
+		if (ISSET(_moedance->flags, _FLAG_KEY_QUIT))
+			_tui_quit_dialog(_moedance);
 		break;
 	case SIGHUP:
 	case SIGINT:
 	case SIGQUIT:
 	case SIGTERM:
-		UNSET(moedance->flags, _FLAG_ALIVE);
+		UNSET(_moedance->flags, _FLAG_ALIVE);
 		break;
 	default:
 		log_err(0, "moedance: _event_handle_signal: invalid signal: %d", sig);
@@ -206,7 +205,7 @@ _event_loop(MoeDance *m)
 	};
 
 	SET(m->flags, (_FLAG_ALIVE | _FLAG_READY));
-	while (CHECK(m->flags, _FLAG_ALIVE)) {
+	while (ISSET(m->flags, _FLAG_ALIVE)) {
 		int ret = poll(&pfds, 1, -1);
 		if (ret < 0) {
 			if (errno == EINTR)
@@ -221,11 +220,11 @@ _event_loop(MoeDance *m)
 			continue;
 
 		const short int rv = pfds.revents;
-		if (CHECK(rv, POLLHUP | POLLERR)) {
+		if (ISSET(rv, POLLHUP | POLLERR)) {
 			const char *revents_str = "???";
-			if (CHECK(rv, POLLHUP))
+			if (ISSET(rv, POLLHUP))
 				revents_str = "POLLHUP";
-			else if (CHECK(rv, POLLERR))
+			else if (ISSET(rv, POLLERR))
 				revents_str = "POLLERR";
 
 			log_info("moedance; _event_loop: revents: %s", revents_str);
@@ -233,7 +232,7 @@ _event_loop(MoeDance *m)
 			return -1;
 		}
 
-		if (CHECK(rv, POLLIN) == 0)
+		if (ISSET(rv, POLLIN) == 0)
 			continue;
 
 		_event_handle_kbd(m, pfds.fd);
@@ -247,17 +246,28 @@ _event_loop(MoeDance *m)
 static void
 _event_handle_kbd(MoeDance *m, int fd)
 {
-	char buffer[4096];
+	char buffer[32];
 	const ssize_t rd = read(fd, buffer, sizeof(buffer));
 	if (rd < 0) {
 		log_err(errno, "moedance: _event_handle_kbd: read");
 		return;
 	}
 
-	if (CHECK(m->flags, _FLAG_READY) == 0)
+	if (ISSET(m->flags, _FLAG_READY) == 0)
 		return;
 
 	const int kbd = kbd_parse(buffer, (int)rd);
+	if (ISSET(m->flags, _FLAG_KEY_QUIT)) {
+		if (kbd == KBD_Y) {
+			UNSET(m->flags, _FLAG_ALIVE);
+			return;
+		}
+
+		UNSET(m->flags, _FLAG_KEY_QUIT);
+		tui_show_dialog(&m->tui, NULL);
+		return;
+	}
+
 	switch (kbd) {
 	case KBD_ARROW_UP: tui_playlist_cursor_up(&m->tui); break;
 	case KBD_ARROW_DOWN: tui_playlist_cursor_down(&m->tui); break;
@@ -274,14 +284,7 @@ _event_handle_kbd(MoeDance *m, int fd)
 		SET(m->flags, _FLAG_KEY_QUIT);
 		_tui_quit_dialog(m);
 		return;
-	case KBD_Y:
-		if (CHECK(m->flags, _FLAG_KEY_QUIT))
-			UNSET(m->flags, _FLAG_ALIVE);
-
-		break;
 	}
-
-	UNSET(m->flags, _FLAG_KEY_QUIT);
 }
 
 
@@ -341,6 +344,9 @@ _on_player_begin(void *udata)
 {
 	MoeDance *const m = (MoeDance *)udata;
 	pthread_mutex_lock(&m->mutex); /* LOCK */
+
+	/* TODO */
+
 	pthread_mutex_unlock(&m->mutex); /* UNLOCK */
 }
 
@@ -350,6 +356,9 @@ _on_player_end(void *udata)
 {
 	MoeDance *const m = (MoeDance *)udata;
 	pthread_mutex_lock(&m->mutex); /* LOCK */
+
+	/* TODO */
+
 	pthread_mutex_unlock(&m->mutex); /* UNLOCK */
 }
 
@@ -360,8 +369,8 @@ _on_player_duration(void *udata)
 	MoeDance *const m = (MoeDance *)udata;
 	pthread_mutex_lock(&m->mutex); /* LOCK */
 
-	if (CHECK(m->flags, _FLAG_TUI_READY | _FLAG_KEY_QUIT)) {
-		if (CHECK(m->flags, _FLAG_KEY_QUIT) == 0) {
+	if (ISSET(m->flags, _FLAG_TUI_READY | _FLAG_KEY_QUIT)) {
+		if (ISSET(m->flags, _FLAG_KEY_QUIT) == 0) {
 			const int64_t duration = m->tui.playlist.duration + 1;
 			tui_set_duration(&m->tui, duration);
 		}

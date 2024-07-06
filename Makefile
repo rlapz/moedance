@@ -2,46 +2,52 @@
 # MoeDance - A pretty simple music player
 #
 
-TARGET  = moedance
-VERSION = 0.0.1
+TARGET  := moedance
+VERSION := 0.0.1
 
-PREFIX = /usr
-CC     = cc
-#CFLAGS = -std=c99 -Wall -Wextra -D_XOPEN_SOURCE=700 -pedantic -O3
-CFLAGS = -std=c99 -Wall -Wextra -D_XOPEN_SOURCE=700 -pedantic -I/usr/include/ffmpeg -O3
-OPT    = 
+IS_DEBUG ?= 0
+PREFIX   := /usr
+CC       := cc
+CFLAGS   := -std=c99 -Wall -Wextra -D_XOPEN_SOURCE=700 -pedantic -I/usr/include/ffmpeg
+LFLAGS   := -lpthread -lm -lavformat -lavutil
+SRC      := main.c moedance.c tui.c player.c playlist.c kbd.c util.c
+OBJ      := $(SRC:.c=.o)
 
-SRC = main.c moedance.c tui.c player.c playlist.c kbd.c util.c
-OBJ = $(SRC:.c=.o)
+ifeq ($(IS_DEBUG), 1)
+	CFLAGS := $(CFLAGS) -g -DDEBUG -O0
+	LFLAGS := $(LFLAGS) -fsanitize=address -fsanitize=undefined
+else
+	CFLAGS := $(CFLAGS) -O3
+endif
 
 #---------------------------------------------------------------------------------------------------#
 
-all: options $(TARGET)
+build: options $(TARGET)
 
 $(OBJ): config.h
 
 config.h:
 	cp config.def.h $(@)
 
-.o: $(TARGET).c
-	$(CC) $(CFLAGS) -o $(@) -c $(<)
+$(TARGET).o: $(TARGET).c
+	@printf "\n%s\n--------------------\n" "Compiling..."
+	$(CC) $(CFLAGS) -c -o $(@) $(<)
 
 $(TARGET): $(OBJ)
-	#$(CC) $(^) -o $(@) -lpthread -lm
-	$(CC) $(^) -lpthread -lm -lavformat -lavutil -o $(@)
+	@printf "\n%s\n--------------------\n" "Linking..."
+	$(CC) -o $(@) $(^) $(LFLAGS)
+
+
 #---------------------------------------------------------------------------------------------------#
 
 options:
-	@echo $(TARGET) build options:
-	@echo "CC     = $(CC)"
-	@echo "CFLAGS = $(CFLAGS)"
+	@echo \'$(TARGET)\' build options:
+	@echo "CFLAGS =" $(CFLAGS)
+	@echo "CC     =" $(CC)
 
 clean:
-	rm -f moedance $(OBJ) moedance-$(VERSION).tar.gz
-
-install: all
-	@echo installing executable file to $(PREFIX)/bin
+	@echo cleaning...
+	rm -f $(OBJ) $(TARGET)
 
 #---------------------------------------------------------------------------------------------------#
-.PHONY: all options clean dist install uninstall
-
+.PHONY: build clean
