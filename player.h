@@ -3,46 +3,52 @@
 
 
 #include <stdint.h>
-#include <pthread.h>
+#include <stdatomic.h>
+#include <threads.h>
 
-#include "playlist.h"
-#include "util.h"
+#include <portaudio.h>
+#include <libavformat/avformat.h>
+#include <libavcodec/avcodec.h>
+#include <libavutil/avutil.h>
+#include <libavutil/opt.h>
+#include <libavutil/channel_layout.h>
+#include <libswresample/swresample.h>
+
+#include "pa/pa_ringbuffer.h"
 
 
-enum {
-	PLAYER_STATE_STOPPED = 0,
-	PLAYER_STATE_PLAYING,
-	PLAYER_STATE_PAUSED,
-	PLAYER_STATE_UNKNOWN,
-};
+typedef struct player_context {
+	atomic_int         is_active;
+	atomic_int         is_stopped;
+	unsigned           index;
+	AVPacket          *pkt;
+	AVFrame           *frame;
+	AVFormatContext   *format;
+	AVCodecContext    *codec;
+	SwrContext        *swr;
+	uint8_t           *swr_buffer;
+	thrd_t             thrd;
+	atomic_size_t      frames_total;
+	const char        *file;
+} PlayerContext;
 
-typedef void (*PlayerCallback)(void *udata);
-
-typedef struct {
-	int                 is_alive;
-	int                 state;
-	const PlaylistItem *playlist_item;
-	int64_t             playlist_item_duration;
-
-	PlayerCallback      on_player_begin;
-	PlayerCallback      on_player_end;
-	PlayerCallback      on_player_duration;
-	void               *callback_udata;
-
-	pthread_mutex_t    mutex;
-	pthread_cond_t     condv;
+typedef struct player {
+	atomic_int        is_paused;
+	PaStream          *stream;
+	PaUtilRingBuffer   buffer;
+	PlayerContext      context;
+	uint8_t           *swr_buffer;
 } Player;
 
 
-int  player_init(Player *p, PlayerCallback on_player_begin, PlayerCallback on_player_end,
-		 PlayerCallback on_player_duration, void *callback_udata);
-void player_deinit(Player *p);
-int  player_run(Player *p);
-void player_stop(Player *p);
-
-int  player_item_play(Player *p, const PlaylistItem *item);
-int  player_item_pause(Player *p);
-int  player_item_stop(Player *p);
+int     player_init(Player *p);
+void    player_deinit(Player *p);
+int     player_item_play(Player *p, const char file[]);
+void    player_item_stop(Player *p);
+void    player_item_pause(Player *p);
+void    player_item_resume(Player *p);
+int64_t player_item_get_time(Player *p);
+int     player_item_is_stopped(Player *p);
 
 
 #endif

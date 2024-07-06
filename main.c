@@ -27,7 +27,7 @@ _load_default_path(char buffer[], size_t size)
 static void
 _print_help(const char app_name[])
 {
-	printf("MoeDance - A pretty and simple music player\n"
+	printf("Moedance - A pretty and simple music player\n"
 	       "\nUsage: %s [PATH]\n", app_name);
 }
 
@@ -36,7 +36,7 @@ int
 main(int argc, char *argv[])
 {
 	int ret = EXIT_FAILURE;
-	MoeDance m;
+	Moedance m;
 	const char *path;
 	char buffer[4096];
 
@@ -58,9 +58,11 @@ main(int argc, char *argv[])
 		return ret;
 	}
 
-	moedance_init(&m, path);
+	if (moedance_init(&m, path) < 0)
+		return 1;
+
 	ret = moedance_run(&m);
 	moedance_deinit(&m);
-	return ret;
+	return -ret;
 }
 

@@ -7,8 +7,7 @@
 
 
 /* allowed file types */
-#define CFG_FILE_TYPES		\
-{				\
+#define CFG_FILE_TYPES {	\
 	"mp3",			\
 	"flac",			\
 	"wav",			\
@@ -16,6 +15,7 @@
 	/* "mp4", */			\
 	/* "aac", */			\
 	/* "amr", */			\
+	/* "mkv", */			\
 }
 
 
@@ -39,6 +39,7 @@
 
 #define CFG_DIR_RECURSIVE_SIZE (8)
 #define CFG_LOG_FILE           "/tmp/moedance.log"
+#define CFG_PROBE_SCORE_MIN    (1)
 
 
 #endif

@@ -8,14 +8,14 @@ VERSION := 0.0.1
 IS_DEBUG ?= 0
 PREFIX   := /usr
 CC       := cc
-CFLAGS   := -std=c99 -Wall -Wextra -D_XOPEN_SOURCE=700 -pedantic -I/usr/include/ffmpeg
-LFLAGS   := -lpthread -lm -lavformat -lavutil
-SRC      := main.c moedance.c tui.c player.c playlist.c kbd.c util.c
+CFLAGS   := -std=c11 -Wall -Wextra -D_POSIX_C_SOURCE=200809L -pedantic -I/usr/include/ffmpeg
+LFLAGS   := -lm -lavformat -lavutil -lavcodec -lswresample -lz -lportaudio
+SRC      := main.c moedance.c tui.c player.c playlist.c kbd.c util.c pa/pa_ringbuffer.c
 OBJ      := $(SRC:.c=.o)
 
 ifeq ($(IS_DEBUG), 1)
 	CFLAGS := $(CFLAGS) -g -DDEBUG -O0
-	LFLAGS := $(LFLAGS) -fsanitize=address -fsanitize=undefined
+	LFLAGS := $(LFLAGS) -fsanitize=address -fsanitize=undefined -fsanitize=leak
 else
 	CFLAGS := $(CFLAGS) -O3
 endif
@@ -43,6 +43,7 @@ $(TARGET): $(OBJ)
 options:
 	@echo \'$(TARGET)\' build options:
 	@echo "CFLAGS =" $(CFLAGS)
+	@echo "LFLAGS =" $(LFLAGS)
 	@echo "CC     =" $(CC)
 
 clean:

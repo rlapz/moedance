@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <errno.h>
 #include <ctype.h>
 #include <inttypes.h>
@@ -8,7 +9,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
-#include <pthread.h>
+#include <threads.h>
 
 #include "util.h"
 
@@ -17,11 +18,13 @@
  * cstr
  */
 void
-cstr_copy(char dest[], const char src[])
+cstr_copy_n(char dest[], size_t dest_size, const char src[], size_t src_len)
 {
-	const size_t slen = strlen(src);
-	memcpy(dest, src, slen);
-	dest[slen] = '\0';
+	if (dest_size <= src_len)
+		src_len = dest_size - 1;
+
+	memcpy(dest, src, src_len);
+	dest[src_len] = '\0';
 }
 
 
@@ -38,7 +41,7 @@ cstr_time_fmt(char dest[], size_t size, int64_t secs)
 	secs %= 60;
 
 	if (snprintf(dest, size, "%02" PRIi64 ":%02" PRIu64 ":%02" PRIi64, h, m, secs) < 0)
-		cstr_copy(dest, "??:??:??");
+		cstr_copy_n(dest, size, "??:??:??", 8);
 
 	return dest;
 }
@@ -356,10 +359,25 @@ array_ptr_append(ArrayPtr *a, void *item)
 
 
 /*
+ * Stream
+ */
+void
+stream_in_flush(int fd)
+{
+	int c;
+	while (read(fd, &c, 1) > 0);
+	errno = 0;
+}
+
+
+/*
  * Log
  */
+#define _LOG_ALT_NAME "./moedance.log"
+
 static FILE *_log_file_out = NULL;
-static pthread_mutex_t _log_mutex = PTHREAD_MUTEX_INITIALIZER;
+static FILE *_log_file_err = NULL;
+static mtx_t _log_mutex;
 
 
 static const char *
@@ -385,17 +403,33 @@ _log_datetime_now(char dest[], size_t size)
 }
 
 
-void
+int
 log_file_init(const char path[])
 {
-	if (_log_file_out == NULL) {
-		_log_file_out = fopen(path, "a+");
-		if (_log_file_out == NULL)
-			_log_file_out = fopen("./moedance.log", "a+");
+	if (mtx_init(&_log_mutex, mtx_plain) != 0) {
+		fprintf(stdout, "log: log_file_init: mtx_init: failed\n");
+		return -1;
 	}
 
-	if (_log_file_out != NULL)
-		log_info("starting...");
+	/* redirect all outputs to a file */
+	_log_file_out = freopen(path, "a+", stdout);
+	if (_log_file_out == NULL)
+		_log_file_out = freopen(_LOG_ALT_NAME, "a+", stdout);
+
+	assert(_log_file_out != NULL);
+
+	_log_file_err = freopen(path, "a+", stderr);
+	if (_log_file_err == NULL)
+		_log_file_err = freopen(_LOG_ALT_NAME, "a+", stderr);
+
+	assert(_log_file_err != NULL);
+
+
+	setvbuf(_log_file_err, NULL, _IONBF, 0);
+	setvbuf(_log_file_out, NULL, _IONBF, 0);
+
+	log_info("starting...");
+	return 0;
 }
 
 
@@ -404,8 +438,15 @@ log_file_deinit(void)
 {
 	if (_log_file_out != NULL) {
 		log_info("stopped");
+		fflush(_log_file_out);
+		fflush(_log_file_err);
 		fclose(_log_file_out);
+		fclose(_log_file_err);
 	}
+
+	puts("...");
+	mtx_destroy(&_log_mutex);
+	puts("...");
 }
 
 
@@ -413,7 +454,6 @@ void
 log_err(int errnum, const char fmt[], ...)
 {
 	int ret;
-	FILE *out = _log_file_out;
 	va_list va;
 	char datetm[32];
 	char buffer[1024];
@@ -429,19 +469,15 @@ log_err(int errnum, const char fmt[], ...)
 	if ((size_t)ret >= LEN(buffer))
 		buffer[LEN(buffer) - 1] = '\0';
 
-	pthread_mutex_lock(&_log_mutex); /* LOCK */
+	mtx_lock(&_log_mutex); /* LOCK */
 
 	const char *const dt_now = _log_datetime_now(datetm, LEN(datetm));
-	if (out == NULL)
-		out = stderr;
-
 	if (errnum != 0)
-		fprintf(out, "ERROR: [%s]: %s: %s\n", dt_now, buffer, strerror(abs(errnum)));
+		fprintf(_log_file_err, "ERROR: [%s]: %s: %s\n", dt_now, buffer, strerror(abs(errnum)));
 	else
-		fprintf(out, "ERROR: [%s]: %s\n", dt_now, buffer);
+		fprintf(_log_file_err, "ERROR: [%s]: %s\n", dt_now, buffer);
 
-	fflush(out);
-	pthread_mutex_unlock(&_log_mutex); /* UNLOCK */
+	mtx_unlock(&_log_mutex); /* UNLOCK */
 }
 
 
@@ -449,7 +485,6 @@ void
 log_info(const char fmt[], ...)
 {
 	int ret;
-	FILE *out = _log_file_out;
 	va_list va;
 	char datetm[32];
 	char buffer[1024];
@@ -465,12 +500,11 @@ log_info(const char fmt[], ...)
 	if ((size_t)ret >= LEN(buffer))
 		buffer[LEN(buffer) - 1] = '\0';
 
-	pthread_mutex_lock(&_log_mutex); /* LOCK */
+	mtx_lock(&_log_mutex); /* LOCK */
 
 	const char *const dt_now = _log_datetime_now(datetm, LEN(datetm));
-	fprintf((out == NULL)? stdout:out, "INFO: [%s]: %s\n", dt_now, buffer);
+	fprintf(_log_file_out, "INFO: [%s]: %s\n", dt_now, buffer);
 
-	fflush(out);
-	pthread_mutex_unlock(&_log_mutex); /* UNLOCK */
+	mtx_unlock(&_log_mutex); /* UNLOCK */
 }
 

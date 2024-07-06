@@ -17,9 +17,9 @@ typedef struct playlist {
 } Playlist;
 
 
-void                 playlist_init(Playlist *p);
-const PlaylistItem **playlist_load(Playlist *p, const char root_dir[], int *len);
-void                 playlist_deinit(Playlist *p);
+int  playlist_init(Playlist *p, const char root_dir[]);
+int  playlist_load(Playlist *p, const PlaylistItem **items[]);
+void playlist_deinit(Playlist *p);
 
 
 #endif

@@ -16,7 +16,7 @@
 /*
  * cstr
  */
-void  cstr_copy(char dest[], const char src[]);
+void  cstr_copy_n(char dest[], size_t dest_size, const char src[], size_t src_len);
 char *cstr_time_fmt(char dest[], size_t size, int64_t secs);
 int   cstr_cmp_vers(const char a[], const char b[]);
 
@@ -57,9 +57,15 @@ int  array_ptr_append(ArrayPtr *a, void *item);
 
 
 /*
+ * Stream
+ */
+void stream_in_flush(int fd);
+
+
+/*
  * log
  */
-void log_file_init(const char path[]);
+int  log_file_init(const char path[]);
 void log_file_deinit(void);
 void log_err(int errnum, const char fmt[], ...);
 void log_info(const char fmt[], ...);
