@@ -48,7 +48,7 @@ main(int argc, char *argv[])
 	case 2:
 		if (strcmp(argv[1], "-h") == 0) {
 			_print_help(argv[0]);
-			return 0;
+			return EXIT_SUCCESS;
 		}
 
 		path = argv[1];

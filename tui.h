@@ -12,13 +12,13 @@
 #include "config.h"
 
 
-typedef struct {
+typedef struct tui_playlist_item {
 	int                 is_selected;
 	int                 now_playing;
 	const PlaylistItem *item;
 } TuiPlaylistItem;
 
-typedef struct {
+typedef struct tui_playlist {
 	int              state;
 	int              top;
 	int              curr;
@@ -30,7 +30,7 @@ typedef struct {
 
 typedef struct termios TermIOS;
 
-typedef struct {
+typedef struct tui {
 	int          width;
 	int          height;
 	int          header_pos;

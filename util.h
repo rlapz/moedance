@@ -24,7 +24,7 @@ int   cstr_cmp_vers(const char a[], const char b[]);
 /*
  * Str
  */
-typedef struct {
+typedef struct str {
 	int     is_alloc;
 	char   *cstr;
 	size_t  size;
@@ -46,7 +46,7 @@ char       *str_dup(Str *s);
 /*
  * ArrayPtr
  */
-typedef struct {
+typedef struct array_ptr {
 	size_t   len;
 	void   **items;
 } ArrayPtr;

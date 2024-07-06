@@ -5,13 +5,13 @@
 #include <stdint.h>
 
 
-typedef struct {
+typedef struct playlist_item {
 	const char *name;
 	int64_t     duration;
 	char        file_path[];
 } PlaylistItem;
 
-typedef struct {
+typedef struct playlist {
 	int            items_len;
 	PlaylistItem **items;
 } Playlist;
