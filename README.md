@@ -1,5 +1,3 @@
-# [WIP]
-
 ## MoeDance - A pretty simple music player
 
 ![](ss.png)
@@ -25,8 +23,8 @@
 2. Down:               j           [OR]  <ARROW DOWN>
 3. Scroll up:          <CTRL> + u  [OR]  <PAGE UP>
 4. Scroll down:        <CTRL> + d  [OR]  <PAGE DOWN>
-5. Go to top:          gg          [OR]  <HOME>           [TODO]
-6. Go to bottom:       G           [OR]  <END>            [TODO]
+5. Go to top:          gg          [OR]  <HOME>
+6. Go to bottom:       G           [OR]  <END>
 7. Next:               n
 8. Prev:               p
 9. Play:               <ENTER>
