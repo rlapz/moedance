@@ -1,0 +1,280 @@
+#include <assert.h>
+#include <ctype.h>
+#include <dirent.h>
+#include <errno.h>
+#include <limits.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <string.h>
+#include <strings.h>
+#include <signal.h>
+#include <unistd.h>
+
+#include <libavformat/avformat.h>
+
+#include <sys/stat.h>
+
+#include "playlist.h"
+#include "util.h"
+#include "config.h"
+
+
+static const char *_allowed_file_types[] = CFG_FILE_TYPES;
+
+
+static int  _verify(const char *name);
+static int  _item_new(PlaylistItem **new_item, const char path[], int path_len);
+static int  _item_new_load(const char path[], int64_t *duration);
+static int  _sort_dir_cb(const struct dirent **a, const struct dirent **b);
+static void _load_files(Str *str, ArrayPtr *file_arr, const char path[], int max_depth);
+
+
+
+/*
+ * public
+ */
+int
+playlist_init(Playlist *p, const char root_dir[])
+{
+	if (chdir(root_dir) < 0)
+		return -1;
+
+	p->items = NULL;
+	p->items_len = 0;
+	return 0;
+}
+
+
+int
+playlist_load(Playlist *p, const PlaylistItem **items[])
+{
+	Str str;
+	if (str_init_alloc(&str, 4096) < 0) {
+		log_err(errno, "playlist: _load_files_recurse: str_init_alloc");
+		return -1;
+	}
+
+	ArrayPtr arr;
+	array_ptr_init(&arr);
+
+	_load_files(&str, &arr, ".", CFG_DIR_RECURSIVE_SIZE);
+
+	/* transfer the ownership */
+	p->items = (PlaylistItem **)arr.items;
+	p->items_len = (int)arr.len;
+
+	str_deinit(&str);
+
+	*items = (const PlaylistItem **)p->items;
+	return p->items_len;
+}
+
+
+void
+playlist_deinit(Playlist *p)
+{
+	PlaylistItem **const items = p->items;
+	for (int i = 0; i < p->items_len; i++)
+		free(items[i]);
+
+	free(p->items);
+}
+
+
+/*
+ * private
+ */
+static int
+_verify(const char *name)
+{
+	const char *ext = strrchr(name, '.');
+	if (ext == NULL)
+		return -1;
+
+	ext++;
+	if (*ext == '\0')
+		return -1;
+
+	for (size_t i = 0; i < LEN(_allowed_file_types); i++) {
+		if (strcasecmp(ext, _allowed_file_types[i]) == 0)
+			return 0;
+	}
+
+	return -1;
+}
+
+
+static int
+_item_new(PlaylistItem **new_item, const char path[], int path_len)
+{
+	int64_t duration = 0;
+	if (_item_new_load(path, &duration) < 0)
+		return -1;
+
+	const size_t path_len_n = ((size_t)path_len) + 1;
+	PlaylistItem *const item = malloc(sizeof(PlaylistItem) + path_len_n);
+	if (item == NULL) {
+		log_err(errno, "playlist: _item_new: item: malloc: \"%s\"", path);
+		return -1;
+	}
+
+	cstr_copy_n(item->file_path, path_len_n, path, path_len);
+
+#if (CFG_PLAYLIST_SHOW_FULL_PATH != 0)
+	/* skip './' */
+	item->name = item->file_path + 2;
+#else
+	const char *const name = strrchr(item->file_path, '/');
+	if (name != NULL)
+		item->name = name + 1;
+	else
+		item->name = item->file_path;
+#endif
+
+	item->duration = duration;
+	*new_item = item;
+	return 0;
+}
+
+
+static int
+_item_new_load(const char path[], int64_t *duration)
+{
+	int ret;
+	AVFormatContext *ctx = NULL;
+#ifdef DEBUG
+	log_info("playlist: _item_new_load: \"%s\"", path);
+#endif
+
+	ret = avformat_open_input(&ctx, path, NULL, NULL);
+	if (ret < 0) {
+		log_err(0, "playlist: _item_new_load: avformat_open_input: \"%s\": %s", path, av_err2str(ret));
+		return -1;
+	}
+
+	if (ctx->probe_score <= CFG_PROBE_SCORE_MIN) {
+		log_err(0, "playlist: _item_new_load: probe_score \"%s\": %d <= %d", path, ctx->probe_score,
+			CFG_PROBE_SCORE_MIN);
+		goto out0;
+	}
+
+	ret = avformat_find_stream_info(ctx, NULL);
+	if (ret < 0) {
+		log_err(0, "playlist: _item_new_load: avformat_find_stream_info: \"%s\": %s", path,
+			av_err2str(ret));
+		goto out0;
+	}
+
+	*duration = ctx->duration / AV_TIME_BASE;
+	ret = 0;
+
+out0:
+	avformat_close_input(&ctx);
+	return ret;
+}
+
+
+static int
+_sort_dir_cb(const struct dirent **a, const struct dirent **b)
+{
+	return cstr_cmp_vers((*a)->d_name, (*b)->d_name);
+}
+
+
+static void
+_load_files(Str *str, ArrayPtr *file_arr, const char path[], int max_depth)
+{
+	int num;
+	struct stat st;
+	struct dirent **list;
+	PlaylistItem *new_item;
+	ArrayPtr dir_arr;
+	char *dir_name;
+
+
+	if (file_arr->len == (INT_MAX - 1)) {
+		log_err(errno, "playlist: _load_files: too many files!: max: %zu", (INT_MAX - 1));
+		return;
+	}
+
+	num = scandir(path, &list, NULL, _sort_dir_cb);
+	if (num < 0) {
+		log_err(errno, "playlist: _load_files: scandir: %s", path);
+		return;
+	}
+
+	array_ptr_init(&dir_arr);
+	for (int i = 0; i < num; i++) {
+		const char *const name = list[i]->d_name;
+		if (name[0] == '.') {
+			free(list[i]);
+			continue;
+		}
+
+		const char *const fname = str_set_fmt(str, "%s/%s", path, name);
+		if (fname == NULL) {
+			log_err(errno, "playlist: _load_files: str_set_fmt");
+			free(list[i]);
+			continue;
+		}
+
+		if (stat(str->cstr, &st) < 0) {
+			log_err(errno, "playlist: _load_files: stat: %s", fname);
+			free(list[i]);
+			continue;
+		}
+
+		switch (st.st_mode & S_IFMT) {
+		case S_IFDIR:
+			/* be aware! */
+			if (max_depth == 0) {
+				log_err(0, "playlist: _load_files: %s: too deep!", fname);
+				for (; i < num; i++)
+					free(list[i]);
+
+				free(list);
+				array_ptr_deinit(&dir_arr);
+				return;
+			}
+
+			dir_name = str_dup(str);
+			if (dir_name == NULL) {
+				log_err(errno, "playlist: _load_files: str_dup: %s", fname);
+				break;
+			}
+
+			if (array_ptr_append(&dir_arr, dir_name) < 0) {
+				log_err(errno, "playlist: _load_files: array_ptr_append: %s", dir_name);
+				free(dir_name);
+			}
+
+			break;
+		case S_IFREG:
+			if (_verify(str->cstr) < 0)
+				break;
+
+			if (_item_new(&new_item, fname, (int)str->len) < 0)
+				break;
+
+			if (array_ptr_append(file_arr, new_item) < 0) {
+				log_err(errno, "playlist: _load_files: array_ptr_append: %s", fname);
+				free(new_item);
+			}
+
+			break;
+		}
+
+		free(list[i]);
+	}
+
+	free(list);
+	for (size_t i = 0; i < dir_arr.len; i++) {
+		dir_name = (char *)dir_arr.items[i];
+
+		/* be aware! */
+		_load_files(str, file_arr, dir_name, max_depth - 1);
+		free(dir_name);
+	}
+
+	array_ptr_deinit(&dir_arr);
+}

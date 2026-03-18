@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <errno.h>
 #include <ctype.h>
 #include <inttypes.h>
@@ -8,6 +9,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <time.h>
+#include <threads.h>
 
 #include "util.h"
 
@@ -16,28 +18,13 @@
  * cstr
  */
 void
-cstr_copy(char dest[], const char src[])
+cstr_copy_n(char dest[], size_t dest_size, const char src[], size_t src_len)
 {
-	const size_t slen = strlen(src);
-	memcpy(dest, src, slen);
-	dest[slen] = '\0';
-}
+	if (dest_size <= src_len)
+		src_len = dest_size - 1;
 
-
-char *
-cstr_copy_s(char dest[], size_t size, const char src[])
-{
-	if (size == 0)
-		return NULL;
-
-	if (size == 1) {
-		dest[0] = '\0';
-		return dest;
-	}
-
-	memcpy(dest, src, size - 1);
-	dest[size] = '\0';
-	return dest;
+	memcpy(dest, src, src_len);
+	dest[src_len] = '\0';
 }
 
 
@@ -54,10 +41,11 @@ cstr_time_fmt(char dest[], size_t size, int64_t secs)
 	secs %= 60;
 
 	if (snprintf(dest, size, "%02" PRIi64 ":%02" PRIu64 ":%02" PRIi64, h, m, secs) < 0)
-		cstr_copy(dest, "??:??:??");
+		cstr_copy_n(dest, size, "??:??:??", 8);
 
 	return dest;
 }
+
 
 /*
  * Copied from: https://git.musl-libc.org/cgit/musl/tree/src/string/strverscmp.c (MIT license)
@@ -85,7 +73,7 @@ cstr_cmp_vers(const char a[], const char b[])
 		}
 	}
 
-	if (((l[dp] - '1') < 9) && ((r[dp] -'1') < 9)) {
+	if (((l[dp] - '1') < 9) && ((r[dp] - '1') < 9)) {
 		/* If we're looking at non-degenerate digit sequences starting
 		 * with nonzero digits, longest digit string is greater. */
 		for (j = i; isdigit(l[j]); j++) {
@@ -109,27 +97,25 @@ cstr_cmp_vers(const char a[], const char b[])
  * Str
  */
 static int
-_str_resize(Str *s, size_t slen)
+_str_resize(Str *s, size_t len)
 {
-	size_t remn_size = 0;
 	const size_t size = s->size;
-	if (size > slen)
-		remn_size = size - s->len;
+	const size_t remn_size = (size > len)? (size - s->len):0;
+	if (len < remn_size)
+		return 0;
 
-	if (slen >= remn_size) {
-		if (s->is_alloc == 0)
-			return -ENOMEM;
-
-		const size_t _rsize = (slen - remn_size) + size + 1;
-		char *const _new_cstr = realloc(s->cstr, _rsize);
-		if (_new_cstr == NULL)
-			return -errno;
-
-		s->size = _rsize;
-		s->cstr = _new_cstr;
-
+	if (s->is_alloc == 0) {
+		errno = ENOMEM;
+		return -errno;
 	}
 
+	const size_t new_size = (len - remn_size) + size + 1;
+	char *const new_cstr = realloc(s->cstr, new_size);
+	if (new_cstr == NULL)
+		return -errno;
+
+	s->size = new_size;
+	s->cstr = new_cstr;
 	return 0;
 }
 
@@ -137,8 +123,10 @@ _str_resize(Str *s, size_t slen)
 int
 str_init(Str *s, char buffer[], size_t size)
 {
-	if (size == 0)
-		return -EINVAL;
+	if (size == 0) {
+		errno = EINVAL;
+		return -errno;
+	}
 
 	buffer[0] = '\0';
 	s->len = 0;
@@ -175,7 +163,7 @@ str_deinit(Str *s)
 }
 
 
-char *
+const char *
 str_set(Str *s, const char cstr[])
 {
 	const size_t cstr_len = strlen(cstr);
@@ -188,14 +176,13 @@ str_set(Str *s, const char cstr[])
 	if (_str_resize(s, cstr_len) < 0)
 		return NULL;
 
-	memcpy(s->cstr, cstr, cstr_len);
+	memcpy(s->cstr, cstr, cstr_len + 1);
 	s->len = cstr_len;
-	s->cstr[cstr_len] = '\0';
 	return s->cstr;
 }
 
 
-char *
+const char *
 str_set_n(Str *s, const char cstr[], size_t len)
 {
 	if (len == 0) {
@@ -214,7 +201,7 @@ str_set_n(Str *s, const char cstr[], size_t len)
 }
 
 
-char *
+const char *
 str_set_fmt(Str *s, const char fmt[], ...)
 {
 	int ret;
@@ -252,7 +239,7 @@ str_set_fmt(Str *s, const char fmt[], ...)
 }
 
 
-char *
+const char *
 str_append(Str *s, const char cstr[])
 {
 	const size_t cstr_len = strlen(cstr);
@@ -262,17 +249,15 @@ str_append(Str *s, const char cstr[])
 	if (_str_resize(s, cstr_len) < 0)
 		return NULL;
 
-	size_t len = s->len;
-	memcpy(s->cstr + len, cstr, cstr_len);
+	const size_t len = s->len;
+	memcpy(s->cstr + len, cstr, cstr_len + 1);
 
-	len += cstr_len;
-	s->len = len;
-	s->cstr[len] = '\0';
+	s->len = len + cstr_len;
 	return s->cstr;
 }
 
 
-char *
+const char *
 str_append_n(Str *s, const char cstr[], size_t len)
 {
 	if (len == 0)
@@ -291,7 +276,7 @@ str_append_n(Str *s, const char cstr[], size_t len)
 }
 
 
-char *
+const char *
 str_append_fmt(Str *s, const char fmt[], ...)
 {
 	int ret;
@@ -331,32 +316,12 @@ str_append_fmt(Str *s, const char fmt[], ...)
 char *
 str_dup(Str *s)
 {
-	const size_t len = s->len + 1;
+	const size_t len = s->len + 1; /* including '\0' */
 	char *const ret = malloc(len);
 	if (ret == NULL)
 		return NULL;
 
-	return memcpy(ret, s->cstr, len);
-}
-
-
-int
-str_write_all(Str *s, int fd)
-{
-	const size_t len = s->len;
-	const char *const cstr = s->cstr;
-	for (size_t i = 0; i < len;) {
-		const ssize_t w = write(fd, cstr + i, len - i);
-		if (w < 0)
-			return -1;
-
-		if (w == 0)
-			break;
-
-		i += (size_t)w;
-	}
-
-	return 0;
+	return (char *)memcpy(ret, s->cstr, len);
 }
 
 
@@ -382,7 +347,7 @@ int
 array_ptr_append(ArrayPtr *a, void *item)
 {
 	const size_t new_len = a->len + 1;
-	uintptr_t **const items = realloc(a->items, sizeof(uintptr_t *) * new_len);
+	void **const items = realloc(a->items, (sizeof(void *) * new_len));
 	if (items == NULL)
 		return -errno;
 
@@ -394,47 +359,77 @@ array_ptr_append(ArrayPtr *a, void *item)
 
 
 /*
+ * Stream
+ */
+void
+stream_in_flush(int fd)
+{
+	int c;
+	while (read(fd, &c, 1) > 0);
+	errno = 0;
+}
+
+
+/*
  * Log
  */
+#define _LOG_ALT_NAME "./moedance.log"
+
 static FILE *_log_file_out = NULL;
+static FILE *_log_file_err = NULL;
+static mtx_t _log_mutex;
 
 
-static inline const char *
+static const char *
 _log_datetime_now(char dest[], size_t size)
 {
+	const char *const ret = "???";
 	const time_t tm_raw = time(NULL);
 	struct tm *const tm = localtime(&tm_raw);
 	if (tm == NULL)
-		goto out0;
+		return ret;
 
 	const char *const res = asctime(tm);
 	if (res == NULL)
-		goto out0;
+		return ret;
 
 	const size_t res_len = strlen(res);
 	if ((res_len == 0) || (res_len >= size))
-		goto out0;
+		return ret;
 
 	memcpy(dest, res, res_len - 1);
 	dest[res_len - 1] = '\0';
 	return dest;
-
-out0:
-	return "???";
 }
 
 
-void
+int
 log_file_init(const char path[])
 {
-	if (_log_file_out == NULL) {
-		_log_file_out = fopen(path, "a+");
-		if (_log_file_out == NULL)
-			_log_file_out = fopen("./moedance.log", "a+");
+	if (mtx_init(&_log_mutex, mtx_plain) != 0) {
+		fprintf(stdout, "log: log_file_init: mtx_init: failed\n");
+		return -1;
 	}
 
-	if (_log_file_out != NULL)
-		log_info("starting...");
+	/* redirect all outputs to a file */
+	_log_file_out = freopen(path, "a+", stdout);
+	if (_log_file_out == NULL)
+		_log_file_out = freopen(_LOG_ALT_NAME, "a+", stdout);
+
+	assert(_log_file_out != NULL);
+
+	_log_file_err = freopen(path, "a+", stderr);
+	if (_log_file_err == NULL)
+		_log_file_err = freopen(_LOG_ALT_NAME, "a+", stderr);
+
+	assert(_log_file_err != NULL);
+
+
+	setvbuf(_log_file_err, NULL, _IONBF, 0);
+	setvbuf(_log_file_out, NULL, _IONBF, 0);
+
+	log_info("starting...");
+	return 0;
 }
 
 
@@ -443,8 +438,15 @@ log_file_deinit(void)
 {
 	if (_log_file_out != NULL) {
 		log_info("stopped");
+		fflush(_log_file_out);
+		fflush(_log_file_err);
 		fclose(_log_file_out);
+		fclose(_log_file_err);
 	}
+
+	puts("...");
+	mtx_destroy(&_log_mutex);
+	puts("...");
 }
 
 
@@ -452,7 +454,6 @@ void
 log_err(int errnum, const char fmt[], ...)
 {
 	int ret;
-	FILE *out = _log_file_out;
 	va_list va;
 	char datetm[32];
 	char buffer[1024];
@@ -468,16 +469,15 @@ log_err(int errnum, const char fmt[], ...)
 	if ((size_t)ret >= LEN(buffer))
 		buffer[LEN(buffer) - 1] = '\0';
 
+	mtx_lock(&_log_mutex); /* LOCK */
+
 	const char *const dt_now = _log_datetime_now(datetm, LEN(datetm));
-	if (out == NULL)
-		out = stderr;
-
 	if (errnum != 0)
-		fprintf(out, "ERROR: [%s]: %s: %s\n", dt_now, buffer, strerror(abs(errnum)));
+		fprintf(_log_file_err, "ERROR: [%s]: %s: %s\n", dt_now, buffer, strerror(abs(errnum)));
 	else
-		fprintf(out, "ERROR: [%s]: %s\n", dt_now, buffer);
+		fprintf(_log_file_err, "ERROR: [%s]: %s\n", dt_now, buffer);
 
-	fflush(out);
+	mtx_unlock(&_log_mutex); /* UNLOCK */
 }
 
 
@@ -485,7 +485,6 @@ void
 log_info(const char fmt[], ...)
 {
 	int ret;
-	FILE *out = _log_file_out;
 	va_list va;
 	char datetm[32];
 	char buffer[1024];
@@ -501,9 +500,11 @@ log_info(const char fmt[], ...)
 	if ((size_t)ret >= LEN(buffer))
 		buffer[LEN(buffer) - 1] = '\0';
 
-	const char *const dt_now = _log_datetime_now(datetm, LEN(datetm));
-	fprintf((out == NULL)? stdout:out, "INFO: [%s]: %s\n", dt_now, buffer);
+	mtx_lock(&_log_mutex); /* LOCK */
 
-	fflush(out);
+	const char *const dt_now = _log_datetime_now(datetm, LEN(datetm));
+	fprintf(_log_file_out, "INFO: [%s]: %s\n", dt_now, buffer);
+
+	mtx_unlock(&_log_mutex); /* UNLOCK */
 }
 

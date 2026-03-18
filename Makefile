@@ -2,45 +2,53 @@
 # MoeDance - A pretty simple music player
 #
 
-TARGET  = moedance
-VERSION = 0.0.1
+TARGET  := moedance
+VERSION := 0.0.1
 
-PREFIX = /usr
-CC     = cc
-#CFLAGS = -std=c99 -Wall -Wextra -Wno-stringop-overflow -pedantic -O3
-CFLAGS = -std=c99 -Wall -Wextra -Wno-stringop-overflow -D_XOPEN_SOURCE=700 -pedantic -g
-OPT    = 
+IS_DEBUG ?= 0
+PREFIX   := /usr
+CC       := cc
+CFLAGS   := -std=c11 -Wall -Wextra -D_POSIX_C_SOURCE=200809L -pedantic -I/usr/include/ffmpeg
+LFLAGS   := -lm -lavformat -lavutil -lavcodec -lswresample -lz -lportaudio
+SRC      := main.c moedance.c tui.c player.c playlist.c kbd.c util.c pa/pa_ringbuffer.c
+OBJ      := $(SRC:.c=.o)
 
-SRC = main.c moedance.c miniaudio.c player.c tui.c util.c
-OBJ = $(SRC:.c=.o)
+ifeq ($(IS_DEBUG), 1)
+	CFLAGS := $(CFLAGS) -g -DDEBUG -O0
+	LFLAGS := $(LFLAGS) -fsanitize=address -fsanitize=undefined -fsanitize=leak
+else
+	CFLAGS := $(CFLAGS) -O3
+endif
 
 #---------------------------------------------------------------------------------------------------#
 
-all: options $(TARGET)
+build: options $(TARGET)
 
 $(OBJ): config.h
 
 config.h:
 	cp config.def.h $(@)
 
-.o: $(TARGET).c
-	$(CC) $(CFLAGS) -o $(@) -c $(<)
+$(TARGET).o: $(TARGET).c
+	@printf "\n%s\n--------------------\n" "Compiling..."
+	$(CC) $(CFLAGS) -c -o $(@) $(<)
 
 $(TARGET): $(OBJ)
-	$(CC) $(^) -o $(@) -lpthread -lm
+	@printf "\n%s\n--------------------\n" "Linking..."
+	$(CC) -o $(@) $(^) $(LFLAGS)
+
+
 #---------------------------------------------------------------------------------------------------#
 
 options:
-	@echo $(TARGET) build options:
-	@echo "CC     = $(CC)"
-	@echo "CFLAGS = $(CFLAGS)"
+	@echo \'$(TARGET)\' build options:
+	@echo "CFLAGS =" $(CFLAGS)
+	@echo "LFLAGS =" $(LFLAGS)
+	@echo "CC     =" $(CC)
 
 clean:
-	rm -f moedance $(OBJ) moedance-$(VERSION).tar.gz
-
-install: all
-	@echo installing executable file to $(PREFIX)/bin
+	@echo cleaning...
+	rm -f $(OBJ) $(TARGET)
 
 #---------------------------------------------------------------------------------------------------#
-.PHONY: all options clean dist install uninstall
-
+.PHONY: build clean

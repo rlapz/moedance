@@ -1,0 +1,358 @@
+[1mdiff --git a/moedance.c b/moedance.c[m
+[1mindex 6963f04..de4766e 100644[m
+[1m--- a/moedance.c[m
+[1m+++ b/moedance.c[m
+[36m@@ -9,15 +9,18 @@[m
+ #include <strings.h>[m
+ #include <signal.h>[m
+ #include <threads.h>[m
+[32m+[m[32m#include <time.h>[m
+ [m
+ #include <sys/stat.h>[m
+[32m+[m[32m#include <sys/signalfd.h>[m
+[32m+[m[32m#include <sys/timerfd.h>[m
+ [m
+ #include "moedance.h"[m
+ #include "kbd.h"[m
+ #include "config.h"[m
+ [m
+ [m
+[31m-#define _POLL_TIMEOUT (100)[m
+[32m+[m[32m#define _TIMER_VALUE_S (1)[m
+ [m
+ [m
+ enum {[m
+[36m@@ -25,6 +28,13 @@[m [menum {[m
+ 	_FLAG_KEY_QUIT  = (1 << 1),[m
+ };[m
+ [m
+[32m+[m[32menum {[m
+[32m+[m	[32m_EVENT_KBD = 0,[m
+[32m+[m	[32m_EVENT_TIMER,[m
+[32m+[m
+[32m+[m	[32m_EVENT_END,[m
+[32m+[m[32m};[m
+[32m+[m
+ [m
+ static int  _set_signal_handler(void);[m
+ static void _signal_handler(int sig);[m
+[36m@@ -33,6 +43,7 @@[m [mstatic void _set_playlist(Moedance *m);[m
+ [m
+ static int  _event_loop(Moedance *m);[m
+ static void _event_handle_kbd(Moedance *m, int fd);[m
+[32m+[m[32mstatic void _event_timerfd_handler(Moedance *m, int fd);[m
+ [m
+ static void _tui_refresh(Moedance *m);[m
+ static void _tui_quit_dialog(Moedance *m);[m
+[36m@@ -47,6 +58,7 @@[m [mstatic void _player_prev(Moedance *m);[m
+ [m
+ [m
+ static Moedance *_moe = NULL;[m
+[32m+[m[32mstatic int _is_started = 0; // TODO[m
+ [m
+ [m
+ /*[m
+[36m@@ -169,6 +181,30 @@[m [m_signal_handler(int sig)[m
+ }[m
+ [m
+ [m
+[32m+[m[32mstatic int[m
+[32m+[m[32m_timerfd_init(time_t timeout_s)[m
+[32m+[m[32m{[m
+[32m+[m	[32mconst int fd = timerfd_create(CLOCK_REALTIME, TFD_NONBLOCK | TFD_CLOEXEC);[m
+[32m+[m	[32mif (fd < 0) {[m
+[32m+[m		[32mlog_err(errno, "moedance: _timerfd_init: timerfd_create");[m
+[32m+[m		[32mreturn -1;[m
+[32m+[m	[32m}[m
+[32m+[m
+[32m+[m	[32mconst struct itimerspec tms = {[m
+[32m+[m		[32m.it_value = (struct timespec) { .tv_sec = timeout_s },[m[41m [m
+[32m+[m		[32m.it_interval = (struct timespec) { .tv_sec = timeout_s },[m[41m [m
+[32m+[m	[32m};[m
+[32m+[m
+[32m+[m	[32mif (timerfd_settime(fd, 0, &tms, NULL) < 0) {[m
+[32m+[m		[32mlog_err(errno, "moedance: _timerfd_init: timerfd_settime");[m
+[32m+[m		[32mclose(fd);[m
+[32m+[m		[32mreturn -1;[m
+[32m+[m	[32m}[m
+[32m+[m
+[32m+[m	[32mreturn fd;[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m
+ static void[m
+ _set_playlist(Moedance *m)[m
+ {[m
+[36m@@ -187,18 +223,25 @@[m [mstatic int[m
+ _event_loop(Moedance *m)[m
+ {[m
+ 	int ret = -1;[m
+[31m-	struct pollfd pfds = {[m
+[31m-		.fd = STDIN_FILENO,[m
+[31m-		.events = POLLIN,[m
+[31m-	};[m
+[32m+[m	[32mstruct pollfd pfds[_EVENT_END];[m
+[32m+[m
+[32m+[m	[32mconst int tfd = _timerfd_init(_TIMER_VALUE_S);[m
+[32m+[m	[32mif (tfd < 0)[m
+[32m+[m		[32mreturn -1;[m
+[32m+[m[41m	[m
+[32m+[m	[32mpfds[_EVENT_KBD].fd = STDIN_FILENO;[m
+[32m+[m	[32mpfds[_EVENT_KBD].events = POLLIN;[m
+[32m+[m	[32mpfds[_EVENT_TIMER].fd = tfd;[m
+[32m+[m	[32mpfds[_EVENT_TIMER].events = POLLIN;[m
+[32m+[m[41m	[m
+ [m
+ 	/* flush input buffer */[m
+[31m-	stream_in_flush(pfds.fd);[m
+[32m+[m	[32mstream_in_flush(pfds[_EVENT_KBD].fd);[m
+ [m
+ 	SET(m->flags, _FLAG_ALIVE);[m
+[31m-	while (LIKELY(ISSET(m->flags, _FLAG_ALIVE))) {[m
+[31m-		int ret = poll(&pfds, 1, _POLL_TIMEOUT);[m
+[31m-		if (UNLIKELY(ret < 0)) {[m
+[32m+[m	[32mwhile (ISSET(m->flags, _FLAG_ALIVE)) {[m
+[32m+[m		[32mint ret = poll(pfds, LEN(pfds), -1);[m
+[32m+[m		[32mif (ret < 0) {[m
+ 			if (errno == EINTR)[m
+ 				continue;[m
+ [m
+[36m@@ -206,26 +249,38 @@[m [m_event_loop(Moedance *m)[m
+ 			goto out0;[m
+ 		}[m
+ [m
+[31m-		const short int rv = pfds.revents;[m
+[31m-		if (UNLIKELY(ISSET(rv, POLLHUP | POLLERR))) {[m
+[31m-			const char *revents_str = "???";[m
+[31m-			if (ISSET(rv, POLLHUP))[m
+[31m-				revents_str = "POLLHUP";[m
+[31m-			else if (ISSET(rv, POLLERR))[m
+[31m-				revents_str = "POLLERR";[m
+[32m+[m		[32mfor (int i = 0; i < _EVENT_END; i++) {[m
+[32m+[m			[32mconst short int rv = pfds[i].revents;[m
+[32m+[m			[32mif (ISSET(rv, POLLHUP | POLLERR)) {[m
+[32m+[m				[32mconst char *revents_str = "???";[m
+[32m+[m				[32mif (ISSET(rv, POLLHUP))[m
+[32m+[m					[32mrevents_str = "POLLHUP";[m
+[32m+[m				[32melse if (ISSET(rv, POLLERR))[m
+[32m+[m					[32mrevents_str = "POLLERR";[m
+ [m
+[31m-			log_info("moedance: _event_loop: revents: %s", revents_str);[m
+[31m-			goto out0;[m
+[31m-		}[m
+[32m+[m				[32mlog_info("moedance: _event_loop: revents: %s", revents_str);[m
+[32m+[m				[32mgoto out0;[m
+[32m+[m			[32m}[m
+ [m
+[31m-		if (LIKELY(ISSET(rv, POLLIN)))[m
+[31m-			_event_handle_kbd(m, pfds.fd);[m
+[32m+[m			[32mif (ISSET(rv, POLLIN) == 0)[m
+[32m+[m				[32mcontinue;[m
+[32m+[m
+[32m+[m			[32mswitch (i) {[m
+[32m+[m			[32mcase _EVENT_KBD:[m
+[32m+[m				[32m_event_handle_kbd(m, pfds[i].fd);[m
+[32m+[m				[32mbreak;[m
+[32m+[m			[32mcase _EVENT_TIMER:[m
+[32m+[m				[32m_event_timerfd_handler(m, pfds[i].fd);[m
+[32m+[m				[32mbreak;[m
+[32m+[m			[32m}[m
+[32m+[m		[32m}[m
+ 	}[m
+ [m
+ 	tui_show_dialog(&m->tui, "Please wait...", TUI_DIALOG_TYPE_INFO);[m
+ 	ret = 0;[m
+ [m
+ out0:[m
+[32m+[m	[32mclose(tfd);[m
+ 	UNSET(m->flags, _FLAG_ALIVE);[m
+ 	return ret;[m
+ }[m
+[36m@@ -276,6 +331,33 @@[m [m_event_handle_kbd(Moedance *m, int fd)[m
+ }[m
+ [m
+ [m
+[32m+[m[32mstatic void[m
+[32m+[m[32m_event_timerfd_handler(Moedance *m, int fd)[m
+[32m+[m[32m{[m
+[32m+[m	[32muint64_t timer = 0;[m
+[32m+[m	[32mconst ssize_t rd = read(fd, &timer, sizeof(timer));[m
+[32m+[m	[32mif (rd < 0) {[m
+[32m+[m		[32mlog_err(0, "moedance: _event_timerfd_handler: read");[m
+[32m+[m		[32mreturn;[m
+[32m+[m	[32m}[m
+[32m+[m
+[32m+[m	[32mif (rd != sizeof(timer)) {[m
+[32m+[m		[32mlog_err(0, "moedance: _event_timerfd_handler: read: invalid size [%zu:%zu]", rd, sizeof(timer));[m
+[32m+[m		[32mreturn;[m
+[32m+[m	[32m}[m
+[32m+[m
+[32m+[m	[32mtui_set_duration(&m->tui, player_item_get_time(&m->player));[m
+[32m+[m[41m	[m
+[32m+[m	[32mconst int is_stopped = player_item_is_stopped(&m->player);[m
+[32m+[m	[32mif (is_stopped) {[m
+[32m+[m		[32mplayer_item_close(&m->player);[m
+[32m+[m		[32mtui_playlist_stop(&m->tui);[m
+[32m+[m		[32mif (_is_started)[m
+[32m+[m			[32m_player_next(m);[m
+[32m+[m	[32m}[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m
+ static void[m
+ _tui_refresh(Moedance *m)[m
+ {[m
+[36m@@ -316,13 +398,16 @@[m [m_player_play(Moedance *m)[m
+ 	player_item_close(&m->player);[m
+ [m
+ 	const PlaylistItem *const item = tui_playlist_play(&m->tui);[m
+[31m-	if (item == NULL)[m
+[32m+[m	[32mif (item == NULL) {[m
+[32m+[m		[32m_is_started = 0;[m
+ 		return;[m
+[32m+[m	[32m}[m
+ 	[m
+ 	log_info("play: %s", item->name);[m
+ 	if (player_item_open(&m->player, item->file_path) < 0)[m
+ 		goto err0;[m
+ [m
+[32m+[m	[32m_is_started = 1;[m
+ 	player_item_play(&m->player);[m
+ 	return;[m
+ [m
+[36m@@ -337,6 +422,7 @@[m [m_player_stop(Moedance *m)[m
+ {[m
+ 	player_item_close(&m->player);[m
+ 	tui_playlist_stop(&m->tui);[m
+[32m+[m	[32m_is_started = 0;[m
+ }[m
+ [m
+ [m
+[36m@@ -365,13 +451,16 @@[m [m_player_next(Moedance *m)[m
+ 	player_item_close(&m->player);[m
+ [m
+ 	const PlaylistItem *const item = tui_playlist_next(&m->tui);[m
+[31m-	if (item == NULL)[m
+[32m+[m	[32mif (item == NULL) {[m
+[32m+[m		[32m_is_started = 0;[m
+ 		return;[m
+[32m+[m	[32m}[m
+ 	[m
+ 	log_info("next: %s", item->name);[m
+ 	if (player_item_open(&m->player, item->file_path) < 0)[m
+ 		goto err0;[m
+ [m
+[32m+[m	[32m_is_started = 1;[m
+ 	player_item_play(&m->player);[m
+ 	return;[m
+ [m
+[36m@@ -387,14 +476,17 @@[m [m_player_prev(Moedance *m)[m
+ 	player_item_close(&m->player);[m
+ [m
+ 	const PlaylistItem *const item = tui_playlist_prev(&m->tui);[m
+[31m-	if (item == NULL)[m
+[32m+[m	[32mif (item == NULL) {[m
+[32m+[m		[32m_is_started = 0;[m
+ 		return;[m
+[32m+[m	[32m}[m
+ [m
+ 	log_info("prev: %s", item->name);[m
+ 	if (player_item_open(&m->player, item->file_path) < 0)[m
+ 		goto err0;[m
+ [m
+ 	player_item_play(&m->player);[m
+[32m+[m	[32m_is_started = 1;[m
+ 	return;[m
+ [m
+ err0:[m
+[1mdiff --git a/player.c b/player.c[m
+[1mindex d78f41a..c1241bb 100644[m
+[1m--- a/player.c[m
+[1m+++ b/player.c[m
+[36m@@ -73,6 +73,7 @@[m [mplayer_init(Player *p)[m
+ 	}[m
+ 	[m
+ 	atomic_store(&p->is_paused, 0);[m
+[32m+[m	[32matomic_store(&p->context.is_stopped, 1);[m
+ [m
+ 	ret = _open_device(p);[m
+ 	if (ret < 0)[m
+[36m@@ -130,13 +131,14 @@[m [mvoid[m
+ player_item_close(Player *p)[m
+ {[m
+ 	PlayerContext *const c = &p->context;[m
+[31m-	if (atomic_load(&c->is_active) == 0)[m
+[32m+[m	[32mif (atomic_load(&c->is_stopped))[m
+ 		return;[m
+ [m
+ 	atomic_store(&c->is_active, 0);[m
+ 	thrd_join(c->thrd, NULL);[m
+ [m
+ 	_context_deinit(c);[m
+[32m+[m	[32matomic_store(&c->is_stopped, 1);[m
+ }[m
+ [m
+ [m
+[36m@@ -163,9 +165,9 @@[m [mplayer_item_get_time(Player *p)[m
+ [m
+ [m
+ int[m
+[31m-player_item_is_active(Player *p)[m
+[32m+[m[32mplayer_item_is_stopped(Player *p)[m
+ {[m
+[31m-	return atomic_load(&p->context.is_active);[m
+[32m+[m	[32mreturn atomic_load(&p->context.is_stopped);[m
+ }[m
+ [m
+ [m
+[36m@@ -218,7 +220,7 @@[m [m_context_av_init(PlayerContext *c, const char file[])[m
+ {[m
+ 	int ret = avformat_open_input(&c->format, file, NULL, NULL);[m
+ 	if (ret < 0) {[m
+[31m-		log_err(0, "player: _context_av_init: avformat_open_input: %s", av_err2str(ret));[m
+[32m+[m		[32mlog_err(0, "player: _context_av_init: avformat_open_input: %s: %s", av_err2str(ret), file);[m
+ 		return -1;[m
+ 	}[m
+ 	[m
+[36m@@ -419,6 +421,7 @@[m [m_file_thrd(void *udata)[m
+ [m
+ [m
+ 	atomic_store(&c->is_active, 1);[m
+[32m+[m	[32matomic_store(&c->is_stopped, 0);[m
+ 	while (atomic_load(&c->is_active)) {[m
+ 		int ret = av_read_frame(ctx, pkt);[m
+ 		if (ret < 0) {[m
+[1mdiff --git a/player.h b/player.h[m
+[1mindex 4622119..4572b91 100644[m
+[1m--- a/player.h[m
+[1m+++ b/player.h[m
+[36m@@ -19,6 +19,7 @@[m
+ [m
+ typedef struct player_context {[m
+ 	atomic_int         is_active;[m
+[32m+[m	[32matomic_int         is_stopped;[m
+ 	unsigned           index;[m
+ 	AVPacket          *pkt;[m
+ 	AVFrame           *frame;[m
+[36m@@ -46,7 +47,7 @@[m [mvoid    player_item_close(Player *p);[m
+ void    player_item_play(Player *p);[m
+ void    player_item_pause(Player *p);[m
+ int64_t player_item_get_time(Player *p);[m
+[31m-int     player_item_is_active(Player *p);[m
+[32m+[m[32mint     player_item_is_stopped(Player *p);[m
+ [m
+ [m
+ #endif[m
+[1mdiff --git a/util.h b/util.h[m
+[1mindex b065a44..0e8c0c3 100644[m
+[1m--- a/util.h[m
+[1m+++ b/util.h[m
+[36m@@ -11,8 +11,6 @@[m
+ #define SET(X, F)   (X |= (F))[m
+ #define UNSET(X, F) (X &= ~(F))[m
+ #define ISSET(X, F) (X & (F))[m
+[31m-#define LIKELY(X)   __builtin_expect(!!(X), 1)[m
+[31m-#define UNLIKELY(X) __builtin_expect(!!(X), 0)[m
+ [m
+ [m
+ /*[m
