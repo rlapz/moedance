@@ -336,7 +336,7 @@ tui_playlist_play(Tui *t)
 
 
 const PlaylistItem *
-tui_playlist_pause(Tui *t)
+tui_playlist_stop(Tui *t)
 {
 	const PlaylistItem *ret;
 	const int idx = t->playlist.item_active;
@@ -344,7 +344,8 @@ tui_playlist_pause(Tui *t)
 		t->playlist.state = _PLAYER_STATE_STOPPED;
 		ret = NULL;
 	} else {
-		t->playlist.state = _PLAYER_STATE_PAUSED;
+		t->playlist.state = _PLAYER_STATE_STOPPED;
+		t->playlist.item_duration = 0;
 		ret = t->playlist.items[idx];
 	}
 
@@ -366,6 +367,7 @@ tui_playlist_toggle(Tui *t)
 	} else {
 		switch (t->playlist.state) {
 		case _PLAYER_STATE_PAUSED:
+		case _PLAYER_STATE_STOPPED:
 			t->playlist.state = _PLAYER_STATE_PLAYING;
 			break;
 		case _PLAYER_STATE_PLAYING:
@@ -376,27 +378,6 @@ tui_playlist_toggle(Tui *t)
 			break;
 		}
 
-		ret = t->playlist.items[idx];
-	}
-
-	_draw_begin(t);
-	_set_footer(t);
-	_draw_end(t);
-	return ret;
-}
-
-
-const PlaylistItem *
-tui_playlist_stop(Tui *t)
-{
-	const PlaylistItem *ret;
-	const int idx = t->playlist.item_active;
-	if ((idx < 0) || (t->playlist.items_len <= 0)) {
-		t->playlist.state = _PLAYER_STATE_STOPPED;
-		ret = NULL;
-	} else {
-		t->playlist.state = _PLAYER_STATE_STOPPED;
-		t->playlist.item_duration = 0;
 		ret = t->playlist.items[idx];
 	}
 

@@ -62,9 +62,8 @@ void tui_playlist_top(Tui *t);
 void tui_playlist_bottom(Tui *t);
 
 const PlaylistItem *tui_playlist_play(Tui *t);
-const PlaylistItem *tui_playlist_pause(Tui *t);
-const PlaylistItem *tui_playlist_toggle(Tui *t);
 const PlaylistItem *tui_playlist_stop(Tui *t);
+const PlaylistItem *tui_playlist_toggle(Tui *t);
 const PlaylistItem *tui_playlist_next(Tui *t);
 const PlaylistItem *tui_playlist_prev(Tui *t);
 

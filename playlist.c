@@ -318,7 +318,7 @@ _load_files_meta(ArrayPtr *file_arr)
 	
 	ItemChunk *const chunks = malloc((size_t)nprocs * sizeof(ItemChunk));
 	if (chunks == NULL) {
-		log_err(0, "playlist: _load_files_meta: calloc");
+		log_err(0, "playlist: _load_files_meta: malloc");
 		return -1;
 	}
 
@@ -344,7 +344,7 @@ _load_files_meta(ArrayPtr *file_arr)
 		ItemChunk *const chunk = &chunks[i];
 		chunk->thrd_ok = 1;
 		if (thrd_create(&chunk->thrd, _item_new_load_thrd, chunk) != thrd_success) {
-			log_err(0, "playlist: _load_files_meta: thrd_create[%zu]", i);
+			log_err(0, "playlist: _load_files_meta: thrd_create[%d]", i);
 			chunk->thrd_ok = 0;
 		}
 	}

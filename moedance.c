@@ -25,7 +25,8 @@
 
 enum {
 	_FLAG_ALIVE     = (1 << 0),
-	_FLAG_KEY_QUIT  = (1 << 1),
+	_FLAG_STARTED   = (1 << 1),
+	_FLAG_KEY_QUIT  = (1 << 2),
 };
 
 enum {
@@ -38,11 +39,12 @@ enum {
 
 static int  _set_signal_handler(void);
 static void _signal_handler(int sig);
+static int  _timerfd_init(time_t timeout_s);
 
 static void _set_playlist(Moedance *m);
 
 static int  _event_loop(Moedance *m);
-static void _event_handle_kbd(Moedance *m, int fd);
+static void _event_kbd_handler(Moedance *m, int fd);
 static void _event_timerfd_handler(Moedance *m, int fd);
 
 static void _tui_refresh(Moedance *m);
@@ -55,6 +57,7 @@ static void _player_stop(Moedance *m);
 static void _player_toggle(Moedance *m);
 static void _player_next(Moedance *m);
 static void _player_prev(Moedance *m);
+static void _player_error(Moedance *m);
 
 
 // TODO: avoid global variables
@@ -80,7 +83,6 @@ moedance_init(Moedance *m, const char root_dir[])
 
 	m->flags = 0;
 	m->root_dir = root_dir;
-	m->is_started = 0;
 	_moe = m;
 	return 0;
 }
@@ -268,7 +270,7 @@ _event_loop(Moedance *m)
 
 			switch (i) {
 			case _EVENT_KBD:
-				_event_handle_kbd(m, pfds[i].fd);
+				_event_kbd_handler(m, pfds[i].fd);
 				break;
 			case _EVENT_TIMER:
 				_event_timerfd_handler(m, pfds[i].fd);
@@ -288,12 +290,12 @@ out0:
 
 
 static void
-_event_handle_kbd(Moedance *m, int fd)
+_event_kbd_handler(Moedance *m, int fd)
 {
 	char buffer[32];
 	const ssize_t rd = read(fd, buffer, sizeof(buffer));
 	if (rd < 0) {
-		log_err(errno, "moedance: _event_handle_kbd: read");
+		log_err(errno, "moedance: _event_kbd_handler: read");
 		return;
 	}
 
@@ -347,11 +349,13 @@ _event_timerfd_handler(Moedance *m, int fd)
 		return;
 	}
 
-	tui_set_duration(&m->tui, player_item_get_time(&m->player));
+	if (ISSET(m->flags, _FLAG_STARTED)) {
+		if (player_item_is_stopped(&m->player)) {
+			tui_playlist_stop(&m->tui);
+			_player_next(m);
+		}
 
-	if (player_item_is_stopped(&m->player) && m->is_started) {
-		tui_playlist_stop(&m->tui);
-		_player_next(m);
+		tui_set_duration(&m->tui, player_item_get_time(&m->player));
 	}
 
 	if (ISSET(m->flags, _FLAG_KEY_QUIT))
@@ -398,19 +402,16 @@ _player_play(Moedance *m)
 {
 	const PlaylistItem *const item = tui_playlist_play(&m->tui);
 	if (item == NULL) {
-		m->is_started = 0;
+		_player_stop(m);
 		return;
 	}
-	
-	if (player_item_play(&m->player, item->file_path) < 0)
-		goto err0;
 
-	m->is_started = 1;
-	return;
+	if (player_item_play(&m->player, item->file_path) < 0) {
+		_player_error(m);
+		return;
+	}
 
-err0:
-	tui_playlist_stop(&m->tui);
-	_tui_error_dialog(m);
+	SET(m->flags, _FLAG_STARTED);
 }
 
 
@@ -419,7 +420,7 @@ _player_stop(Moedance *m)
 {
 	player_item_stop(&m->player);
 	tui_playlist_stop(&m->tui);
-	m->is_started = 0;
+	UNSET(m->flags, _FLAG_STARTED);
 }
 
 
@@ -428,12 +429,17 @@ _player_toggle(Moedance *m)
 {
 	const PlaylistItem *const item = tui_playlist_toggle(&m->tui);
 	if (item == NULL) {
-		m->is_started = 0;
+		_player_stop(m);
 		return;
 	}
 
-	if (m->is_started == 0) {
-		_player_play(m);
+	if (ISSET(m->flags, _FLAG_STARTED) == 0) {
+		if (player_item_play(&m->player, item->file_path) < 0) {
+			_player_error(m);
+			return;
+		}
+
+		SET(m->flags, _FLAG_STARTED);
 		return;
 	}
 
@@ -446,19 +452,16 @@ _player_next(Moedance *m)
 {
 	const PlaylistItem *const item = tui_playlist_next(&m->tui);
 	if (item == NULL) {
-		m->is_started = 0;
+		_player_stop(m);
 		return;
 	}
 	
-	if (player_item_play(&m->player, item->file_path) < 0)
-		goto err0;
+	if (player_item_play(&m->player, item->file_path) < 0) {
+		_player_error(m);
+		return;
+	}
 
-	m->is_started = 1;
-	return;
-
-err0:
-	tui_playlist_stop(&m->tui);
-	_tui_error_dialog(m);
+	SET(m->flags, _FLAG_STARTED);
 }
 
 
@@ -467,17 +470,23 @@ _player_prev(Moedance *m)
 {
 	const PlaylistItem *const item = tui_playlist_prev(&m->tui);
 	if (item == NULL) {
-		m->is_started = 0;
+		_player_stop(m);
 		return;
 	}
 
-	if (player_item_play(&m->player, item->file_path) < 0)
-		goto err0;
+	if (player_item_play(&m->player, item->file_path) < 0) {
+		_player_error(m);
+		return;
+	}
 
-	m->is_started = 1;
-	return;
+	SET(m->flags, _FLAG_STARTED);
+}
 
-err0:
+
+static void
+_player_error(Moedance *m)
+{
+	UNSET(m->flags, _FLAG_STARTED);
 	tui_playlist_stop(&m->tui);
 	_tui_error_dialog(m);
 }
