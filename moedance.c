@@ -405,7 +405,6 @@ _player_play(Moedance *m)
 		return;
 	}
 	
-	log_info("play: %s", item->name);
 	if (player_item_play(&m->player, item->file_path) < 0)
 		goto err0;
 
@@ -439,7 +438,6 @@ _player_toggle(Moedance *m)
 		return;
 	}
 
-	log_info("toggle: %s", item->name);
 	if (_is_started == 0) {
 		_player_play(m);
 		return;
@@ -465,7 +463,6 @@ _player_next(Moedance *m)
 		return;
 	}
 	
-	log_info("next: %s", item->name);
 	if (player_item_play(&m->player, item->file_path) < 0)
 		goto err0;
 
@@ -489,7 +486,6 @@ _player_prev(Moedance *m)
 		return;
 	}
 
-	log_info("prev: %s", item->name);
 	if (player_item_play(&m->player, item->file_path) < 0)
 		goto err0;
 

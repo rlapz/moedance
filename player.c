@@ -506,9 +506,7 @@ _file_thrd_writer(Player *p)
 			ret = swr_convert(swr, &swr_buffer, _SWR_BUFFER_SIZE, NULL, 0);
 		}
 
-		if (ret < 0) {
+		if (ret < 0)
 			log_err(0, "player: _file_thrd_writer: swr_convert: %s", av_err2str(ret));
-			continue;
-		}
 	}
 }
