@@ -9,24 +9,39 @@
 #include <strings.h>
 #include <signal.h>
 #include <unistd.h>
+#include <threads.h>
 
 #include <libavformat/avformat.h>
 
 #include <sys/stat.h>
+#include <sys/sysinfo.h>
 
 #include "playlist.h"
 #include "util.h"
 #include "config.h"
 
 
+#define _MAX_NPROCS (128)
+
+
 static const char *_allowed_file_types[] = CFG_FILE_TYPES;
+
+
+typedef struct item_chunk {
+	size_t         len;
+	PlaylistItem **list;
+	int            thrd_ok;
+	thrd_t         thrd;
+} ItemChunk;
 
 
 static int  _verify(const char *name);
 static int  _item_new(PlaylistItem **new_item, const char path[], int path_len);
-static int  _item_new_load(const char path[], int64_t *duration);
+static void _item_new_load(const char path[], int64_t *duration);
+static int  _item_new_load_thrd(void *udata);
 static int  _sort_dir_cb(const struct dirent **a, const struct dirent **b);
 static void _load_files(Str *str, ArrayPtr *file_arr, const char path[], int max_depth);
+static void _load_files_meta(ArrayPtr *file_arr);
 
 
 
@@ -38,6 +53,12 @@ playlist_init(Playlist *p, const char root_dir[])
 {
 	if (chdir(root_dir) < 0)
 		return -1;
+
+#ifdef DEBUG
+	av_log_set_level(AV_LOG_VERBOSE);
+#else
+	av_log_set_level(AV_LOG_QUIET);
+#endif
 
 	p->items = NULL;
 	p->items_len = 0;
@@ -58,6 +79,7 @@ playlist_load(Playlist *p, const PlaylistItem **items[])
 	array_ptr_init(&arr);
 
 	_load_files(&str, &arr, ".", CFG_DIR_RECURSIVE_SIZE);
+	_load_files_meta(&arr);
 
 	/* transfer the ownership */
 	p->items = (PlaylistItem **)arr.items;
@@ -107,10 +129,6 @@ _verify(const char *name)
 static int
 _item_new(PlaylistItem **new_item, const char path[], int path_len)
 {
-	int64_t duration = 0;
-	if (_item_new_load(path, &duration) < 0)
-		return -1;
-
 	const size_t path_len_n = ((size_t)path_len) + 1;
 	PlaylistItem *const item = malloc(sizeof(PlaylistItem) + path_len_n);
 	if (item == NULL) {
@@ -131,13 +149,13 @@ _item_new(PlaylistItem **new_item, const char path[], int path_len)
 		item->name = item->file_path;
 #endif
 
-	item->duration = duration;
+	item->duration = 0;
 	*new_item = item;
 	return 0;
 }
 
 
-static int
+static void
 _item_new_load(const char path[], int64_t *duration)
 {
 	int ret;
@@ -149,7 +167,7 @@ _item_new_load(const char path[], int64_t *duration)
 	ret = avformat_open_input(&ctx, path, NULL, NULL);
 	if (ret < 0) {
 		log_err(0, "playlist: _item_new_load: avformat_open_input: \"%s\": %s", path, av_err2str(ret));
-		return -1;
+		return;
 	}
 
 	if (ctx->probe_score <= CFG_PROBE_SCORE_MIN) {
@@ -166,11 +184,22 @@ _item_new_load(const char path[], int64_t *duration)
 	}
 
 	*duration = ctx->duration / AV_TIME_BASE;
-	ret = 0;
 
 out0:
 	avformat_close_input(&ctx);
-	return ret;
+}
+
+
+static int
+_item_new_load_thrd(void *udata)
+{
+	ItemChunk *const chunk = (ItemChunk *)udata;
+	for (size_t i = 0; i < chunk->len; i++) {
+		PlaylistItem *const p = chunk->list[i];
+		_item_new_load(p->file_path, &p->duration);
+	}
+
+	return 0;
 }
 
 
@@ -277,4 +306,52 @@ _load_files(Str *str, ArrayPtr *file_arr, const char path[], int max_depth)
 	}
 
 	array_ptr_deinit(&dir_arr);
+}
+
+
+static void
+_load_files_meta(ArrayPtr *file_arr)
+{
+	ItemChunk chunks[_MAX_NPROCS] = { 0 };
+
+	int nprocs = get_nprocs();
+	if (nprocs <= 0)
+		nprocs = 2;
+	if (nprocs > _MAX_NPROCS)
+		nprocs = _MAX_NPROCS;
+	
+
+	const size_t len = file_arr->len;
+	const size_t count = (size_t)nprocs;
+	const size_t each = (len / count);
+	for (size_t i = 0; i < count; i++) {
+		ItemChunk *const c = &chunks[i];
+		c->list = (PlaylistItem **)&file_arr->items[i * each];
+		c->len = each;
+	}
+
+	// remaining item(s)
+	const size_t total = (each * count);
+	if (total < len) {
+		const size_t diff = (len - total);
+		ItemChunk *const chunk = &chunks[count - 1];
+		chunk->len += diff;
+	}
+
+	for (size_t i = 0; i < count; i++) {
+		ItemChunk *const ch = &chunks[i];
+		ch->thrd_ok = 1;
+		if (thrd_create(&ch->thrd, _item_new_load_thrd, ch) != thrd_success) {
+			log_err(0, "playlist: _load_files_meta: thrd_create[%zu]", i);
+			ch->thrd_ok = 0;
+		}
+	}
+
+	for (size_t i = 0; i < count; i++) {
+		ItemChunk *const ch = &chunks[i];
+		if (ch->thrd_ok == 0)
+			continue;
+		
+		thrd_join(ch->thrd, NULL);
+	}
 }
