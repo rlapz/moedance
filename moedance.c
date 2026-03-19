@@ -30,19 +30,21 @@ enum {
 
 enum {
 	_EVENT_KBD = 0,
+	_EVENT_SIGNAL,
 	_EVENT_TIMER,
 
 	_EVENT_END,
 };
 
 
-static int  _set_signal_handler(void);
-static void _signal_handler(int sig);
+static int  _timerfd_init(time_t timeout_s);
+static int  _signalfd_init(void);
 
 static void _set_playlist(Moedance *m);
 
 static int  _event_loop(Moedance *m);
-static void _event_handle_kbd(Moedance *m, int fd);
+static void _event_kbd_handler(Moedance *m, int fd);
+static void _event_signal_handler(Moedance *m, int fd);
 static void _event_timerfd_handler(Moedance *m, int fd);
 
 static void _tui_refresh(Moedance *m);
@@ -57,31 +59,20 @@ static void _player_next(Moedance *m);
 static void _player_prev(Moedance *m);
 
 
-// TODO: avoid global variables
-static Moedance *_moe = NULL;
-
-
 /*
  * public
  */
 int
 moedance_init(Moedance *m, const char root_dir[])
 {
-	if (mtx_init(&m->mutex, mtx_plain) != 0) {
-		fprintf(stderr, "moedance: moedance_init: mtx_init: failed\n");
-		return -1;
-	}
-
 	if (playlist_init(&m->playlist, root_dir) < 0) {
 		fprintf(stderr, "moedance: moedance_init: playlist_init: \"%s\": %s\n", root_dir, strerror(errno));
-		mtx_destroy(&m->mutex);
 		return -1;
 	}
 
 	m->flags = 0;
 	m->root_dir = root_dir;
 	m->is_started = 0;
-	_moe = m;
 	return 0;
 }
 
@@ -90,7 +81,6 @@ void
 moedance_deinit(Moedance *m)
 {
 	playlist_deinit(&m->playlist);
-	mtx_destroy(&m->mutex);
 }
 
 
@@ -104,21 +94,17 @@ moedance_run(Moedance *m)
 	if (ret < 0)
 		goto out0;
 
-	ret = _set_signal_handler();
-	if (ret < 0)
-		goto out1;
-
 	tui_draw(&m->tui);
 	_set_playlist(m);
 
 	ret = player_init(&m->player);
 	if (ret < 0)
-		goto out2;
+		goto out1;
 
 	ret = _event_loop(m);
 
-out2:
 	player_deinit(&m->player);
+
 out1:
 	tui_deinit(&m->tui);
 out0:
@@ -130,58 +116,6 @@ out0:
 /*
  * private
  */
-static int
-_set_signal_handler(void)
-{
-	struct sigaction act;
-	sigemptyset(&act.sa_mask);
-	act.sa_flags = 0;
-	act.sa_handler = _signal_handler;
-
-
-	const char *ctx;
-	if (sigaction(SIGQUIT, &act, NULL) < 0) {
-		ctx = "SIGQUIT";
-		goto err0;
-	}
-
-	if (sigaction(SIGINT, &act, NULL) < 0) {
-		ctx = "SIGINT";
-		goto err0;
-	}
-
-	if (sigaction(SIGWINCH, &act, NULL) < 0) {
-		ctx = "SIGWINCH";
-		goto err0;
-	}
-
-	return 0;
-
-err0:
-	log_err(errno, "moedance: _set_signal_handler: sigaction: %s", ctx);
-	return -1;
-}
-
-
-static void
-_signal_handler(int sig)
-{
-	switch (sig) {
-	case SIGWINCH:
-		_tui_refresh(_moe);
-		break;
-	case SIGHUP:
-	case SIGINT:
-	case SIGQUIT:
-		UNSET(_moe->flags, _FLAG_ALIVE);
-		break;
-	default:
-		log_err(0, "moedance: _event_handle_signal: invalid signal: %d", sig);
-		break;
-	}
-}
-
-
 static int
 _timerfd_init(time_t timeout_s)
 {
@@ -199,6 +133,27 @@ _timerfd_init(time_t timeout_s)
 	if (timerfd_settime(fd, 0, &tms, NULL) < 0) {
 		log_err(errno, "moedance: _timerfd_init: timerfd_settime");
 		close(fd);
+		return -1;
+	}
+
+	return fd;
+}
+
+
+static int
+_signalfd_init(void)
+{
+	sigset_t mask;
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGINT);
+	sigaddset(&mask, SIGQUIT);
+	sigaddset(&mask, SIGWINCH);
+	sigaddset(&mask, SIGCHLD);
+	sigprocmask(SIG_BLOCK, &mask, NULL);
+
+	const int fd = signalfd(-1, &mask, SFD_CLOEXEC | SFD_NONBLOCK);
+	if (fd < 0) {
+		log_err(errno, "moedance: _signalfd_init: signalfd");
 		return -1;
 	}
 
@@ -230,8 +185,14 @@ _event_loop(Moedance *m)
 	if (tfd < 0)
 		return -1;
 
+	const int sfd = _signalfd_init();;
+	if (sfd < 0)
+		goto out0;
+
 	pfds[_EVENT_KBD].fd = STDIN_FILENO;
 	pfds[_EVENT_KBD].events = POLLIN;
+	pfds[_EVENT_SIGNAL].fd = sfd;
+	pfds[_EVENT_SIGNAL].events = POLLIN;
 	pfds[_EVENT_TIMER].fd = tfd;
 	pfds[_EVENT_TIMER].events = POLLIN;
 
@@ -247,7 +208,7 @@ _event_loop(Moedance *m)
 				continue;
 
 			log_err(errno, "moedance: _event_loop: poll");
-			goto out0;
+			goto out1;
 		}
 
 		for (int i = 0; i < _EVENT_END; i++) {
@@ -260,7 +221,7 @@ _event_loop(Moedance *m)
 					revents_str = "POLLERR";
 
 				log_info("moedance: _event_loop: revents: %s", revents_str);
-				goto out0;
+				goto out1;
 			}
 
 			if (ISSET(rv, POLLIN) == 0)
@@ -268,7 +229,10 @@ _event_loop(Moedance *m)
 
 			switch (i) {
 			case _EVENT_KBD:
-				_event_handle_kbd(m, pfds[i].fd);
+				_event_kbd_handler(m, pfds[i].fd);
+				break;
+			case _EVENT_SIGNAL:
+				_event_signal_handler(m, pfds[i].fd);
 				break;
 			case _EVENT_TIMER:
 				_event_timerfd_handler(m, pfds[i].fd);
@@ -280,6 +244,8 @@ _event_loop(Moedance *m)
 	tui_show_dialog(&m->tui, "Please wait...", TUI_DIALOG_TYPE_INFO);
 	ret = 0;
 
+out1:
+	close(sfd);
 out0:
 	close(tfd);
 	UNSET(m->flags, _FLAG_ALIVE);
@@ -288,12 +254,12 @@ out0:
 
 
 static void
-_event_handle_kbd(Moedance *m, int fd)
+_event_kbd_handler(Moedance *m, int fd)
 {
 	char buffer[32];
 	const ssize_t rd = read(fd, buffer, sizeof(buffer));
 	if (rd < 0) {
-		log_err(errno, "moedance: _event_handle_kbd: read");
+		log_err(errno, "moedance: _event_kbd_handler: read");
 		return;
 	}
 
@@ -333,6 +299,38 @@ _event_handle_kbd(Moedance *m, int fd)
 
 
 static void
+_event_signal_handler(Moedance *m, int fd)
+{
+	struct signalfd_siginfo siginfo;
+	const ssize_t rd = read(fd, &siginfo, sizeof(siginfo));
+	if (rd < 0) {
+		log_err(errno, "moedance: _event_signal_handler: read");
+		_tui_refresh(m);
+		return;
+	}
+
+	if (rd != sizeof(siginfo)) {
+		log_err(0, "moedance: _event_timerfd_handler: read: invalid size [%zu:%zu]", rd, sizeof(siginfo));
+		_tui_refresh(m);
+		return;
+	}
+
+	switch (siginfo.ssi_signo) {
+	case SIGWINCH:
+		_tui_refresh(m);
+		break;
+	case SIGINT:
+	case SIGQUIT:
+		UNSET(m->flags, _FLAG_ALIVE);
+		break;
+	default:
+		log_err(0, "moedance: _event_signal_handler: invalid signal: %d", siginfo.ssi_signo);
+		break;
+	}
+}
+
+
+static void
 _event_timerfd_handler(Moedance *m, int fd)
 {
 	uint64_t timer = 0;
@@ -362,13 +360,9 @@ _event_timerfd_handler(Moedance *m, int fd)
 static void
 _tui_refresh(Moedance *m)
 {
-	mtx_lock(&m->mutex); /* LOCK */
-
 	tui_draw(&m->tui);
 	if (ISSET(m->flags, _FLAG_KEY_QUIT))
 		_tui_quit_dialog(m);
-
-	mtx_unlock(&m->mutex); /* UNLOCK */
 }
 
 
@@ -450,15 +444,13 @@ _player_next(Moedance *m)
 		return;
 	}
 	
-	if (player_item_play(&m->player, item->file_path) < 0)
-		goto err0;
+	if (player_item_play(&m->player, item->file_path) < 0) {
+		tui_playlist_stop(&m->tui);
+		_tui_error_dialog(m);
+		return;
+	}
 
 	m->is_started = 1;
-	return;
-
-err0:
-	tui_playlist_stop(&m->tui);
-	_tui_error_dialog(m);
 }
 
 
@@ -471,13 +463,11 @@ _player_prev(Moedance *m)
 		return;
 	}
 
-	if (player_item_play(&m->player, item->file_path) < 0)
-		goto err0;
+	if (player_item_play(&m->player, item->file_path) < 0) {
+		tui_playlist_stop(&m->tui);
+		_tui_error_dialog(m);
+		return;
+	}
 
 	m->is_started = 1;
-	return;
-
-err0:
-	tui_playlist_stop(&m->tui);
-	_tui_error_dialog(m);
 }

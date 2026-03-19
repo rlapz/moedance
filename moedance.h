@@ -12,15 +12,13 @@
 
 
 typedef struct moedance {
-	volatile int  flags;
+	int           flags;
 	Tui           tui;
 	Player        player;
 	Playlist      playlist;
 	const char   *root_dir;
-	atomic_int    is_started;
-	mtx_t         mutex;
+	int           is_started;
 } Moedance;
-
 
 int  moedance_init(Moedance *m, const char root_dir[]);
 void moedance_deinit(Moedance *m);

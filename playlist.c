@@ -318,7 +318,7 @@ _load_files_meta(ArrayPtr *file_arr)
 	
 	ItemChunk *const chunks = malloc((size_t)nprocs * sizeof(ItemChunk));
 	if (chunks == NULL) {
-		log_err(0, "playlist: _load_files_meta: calloc");
+		log_err(0, "playlist: _load_files_meta: malloc");
 		return -1;
 	}
 
