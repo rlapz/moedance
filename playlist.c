@@ -21,16 +21,13 @@
 #include "config.h"
 
 
-#define _MAX_NPROCS (128)
-
-
 static const char *_allowed_file_types[] = CFG_FILE_TYPES;
 
 
 typedef struct item_chunk {
-	size_t         len;
-	PlaylistItem **list;
 	int            thrd_ok;
+	int            len;
+	PlaylistItem **list;
 	thrd_t         thrd;
 } ItemChunk;
 
@@ -41,8 +38,7 @@ static void _item_new_load(const char path[], int64_t *duration);
 static int  _item_new_load_thrd(void *udata);
 static int  _sort_dir_cb(const struct dirent **a, const struct dirent **b);
 static void _load_files(Str *str, ArrayPtr *file_arr, const char path[], int max_depth);
-static void _load_files_meta(ArrayPtr *file_arr);
-
+static int  _load_files_meta(ArrayPtr *file_arr);
 
 
 /*
@@ -79,7 +75,11 @@ playlist_load(Playlist *p, const PlaylistItem **items[])
 	array_ptr_init(&arr);
 
 	_load_files(&str, &arr, ".", CFG_DIR_RECURSIVE_SIZE);
-	_load_files_meta(&arr);
+	if (_load_files_meta(&arr) < 0) {
+		str_deinit(&str);
+		array_ptr_deinit(&arr);
+		return -1;
+	}
 
 	/* transfer the ownership */
 	p->items = (PlaylistItem **)arr.items;
@@ -117,7 +117,7 @@ _verify(const char *name)
 	if (*ext == '\0')
 		return -1;
 
-	for (size_t i = 0; i < LEN(_allowed_file_types); i++) {
+	for (int i = 0; i < (int)LEN(_allowed_file_types); i++) {
 		if (strcasecmp(ext, _allowed_file_types[i]) == 0)
 			return 0;
 	}
@@ -194,7 +194,7 @@ static int
 _item_new_load_thrd(void *udata)
 {
 	ItemChunk *const chunk = (ItemChunk *)udata;
-	for (size_t i = 0; i < chunk->len; i++) {
+	for (int i = 0; i < chunk->len; i++) {
 		PlaylistItem *const p = chunk->list[i];
 		_item_new_load(p->file_path, &p->duration);
 	}
@@ -309,52 +309,54 @@ _load_files(Str *str, ArrayPtr *file_arr, const char path[], int max_depth)
 }
 
 
-static void
+static int
 _load_files_meta(ArrayPtr *file_arr)
 {
-	ItemChunk chunks[_MAX_NPROCS] = { 0 };
-
 	int nprocs = get_nprocs();
 	if (nprocs <= 0)
-		nprocs = 2;
-	if (nprocs > _MAX_NPROCS)
-		nprocs = _MAX_NPROCS;
+		nprocs = 1;
 	
+	ItemChunk *const chunks = malloc((size_t)nprocs * sizeof(ItemChunk));
+	if (chunks == NULL) {
+		log_err(0, "playlist: _load_files_meta: calloc");
+		return -1;
+	}
 
-	const size_t len = file_arr->len;
-	size_t count = (size_t)nprocs;
-	if (count > len)
-		count = len;
+	const int len = (int)file_arr->len;
+	if (nprocs > len)
+		nprocs = len;
 
-	const size_t each = (len / count);
-	for (size_t i = 0; i < count; i++) {
-		ItemChunk *const c = &chunks[i];
-		c->list = (PlaylistItem **)&file_arr->items[i * each];
-		c->len = each;
+	const int each = (len / nprocs);
+	for (int i = 0; i < nprocs; i++) {
+		ItemChunk *const chunk = &chunks[i];
+		chunk->list = (PlaylistItem **)&file_arr->items[i * each];
+		chunk->len = each;
 	}
 
 	// remaining item(s)
-	const size_t total = (each * count);
+	const int total = (each * nprocs);
 	if (total < len) {
-		const size_t diff = (len - total);
-		ItemChunk *const chunk = &chunks[count - 1];
-		chunk->len += diff;
+		ItemChunk *const chunk = &chunks[nprocs - 1];
+		chunk->len += (len - total);
 	}
 
-	for (size_t i = 0; i < count; i++) {
-		ItemChunk *const ch = &chunks[i];
-		ch->thrd_ok = 1;
-		if (thrd_create(&ch->thrd, _item_new_load_thrd, ch) != thrd_success) {
+	for (int i = 0; i < nprocs; i++) {
+		ItemChunk *const chunk = &chunks[i];
+		chunk->thrd_ok = 1;
+		if (thrd_create(&chunk->thrd, _item_new_load_thrd, chunk) != thrd_success) {
 			log_err(0, "playlist: _load_files_meta: thrd_create[%zu]", i);
-			ch->thrd_ok = 0;
+			chunk->thrd_ok = 0;
 		}
 	}
 
-	for (size_t i = 0; i < count; i++) {
-		ItemChunk *const ch = &chunks[i];
-		if (ch->thrd_ok == 0)
+	for (int i = 0; i < nprocs; i++) {
+		ItemChunk *const chunk = &chunks[i];
+		if (chunk->thrd_ok == 0)
 			continue;
 		
-		thrd_join(ch->thrd, NULL);
+		thrd_join(chunk->thrd, NULL);
 	}
+
+	free(chunks);
+	return 0;
 }

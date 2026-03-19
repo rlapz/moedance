@@ -59,8 +59,6 @@ static void _player_prev(Moedance *m);
 
 // TODO: avoid global variables
 static Moedance *_moe = NULL;
-static int _is_started = 0; // TODO: simplify
-static int _is_paused = 0;  // TODO: simplify
 
 
 /*
@@ -82,6 +80,7 @@ moedance_init(Moedance *m, const char root_dir[])
 
 	m->flags = 0;
 	m->root_dir = root_dir;
+	m->is_started = 0;
 	_moe = m;
 	return 0;
 }
@@ -350,10 +349,9 @@ _event_timerfd_handler(Moedance *m, int fd)
 
 	tui_set_duration(&m->tui, player_item_get_time(&m->player));
 
-	if (player_item_is_stopped(&m->player)) {
+	if (player_item_is_stopped(&m->player) && m->is_started) {
 		tui_playlist_stop(&m->tui);
-		if (_is_started)
-			_player_next(m);
+		_player_next(m);
 	}
 
 	if (ISSET(m->flags, _FLAG_KEY_QUIT))
@@ -400,16 +398,14 @@ _player_play(Moedance *m)
 {
 	const PlaylistItem *const item = tui_playlist_play(&m->tui);
 	if (item == NULL) {
-		_is_started = 0;
-		_is_paused = 0;
+		m->is_started = 0;
 		return;
 	}
 	
 	if (player_item_play(&m->player, item->file_path) < 0)
 		goto err0;
 
-	_is_started = 1;
-	_is_paused = 0;
+	m->is_started = 1;
 	return;
 
 err0:
@@ -422,8 +418,8 @@ static void
 _player_stop(Moedance *m)
 {
 	player_item_stop(&m->player);
-	_is_started = 0;
-	_is_paused = 0;
+	tui_playlist_stop(&m->tui);
+	m->is_started = 0;
 }
 
 
@@ -432,24 +428,16 @@ _player_toggle(Moedance *m)
 {
 	const PlaylistItem *const item = tui_playlist_toggle(&m->tui);
 	if (item == NULL) {
-		player_item_stop(&m->player);
-		_is_started = 0;
-		_is_paused = 0;
+		m->is_started = 0;
 		return;
 	}
 
-	if (_is_started == 0) {
+	if (m->is_started == 0) {
 		_player_play(m);
 		return;
 	}
 
-	if (_is_paused) {
-		player_item_resume(&m->player);
-		_is_paused = 0;
-	} else {
-		player_item_pause(&m->player);
-		_is_paused = 1;
-	}
+	player_item_toggle(&m->player);
 }
 
 
@@ -458,16 +446,14 @@ _player_next(Moedance *m)
 {
 	const PlaylistItem *const item = tui_playlist_next(&m->tui);
 	if (item == NULL) {
-		_is_started = 0;
-		_is_paused = 0;
+		m->is_started = 0;
 		return;
 	}
 	
 	if (player_item_play(&m->player, item->file_path) < 0)
 		goto err0;
 
-	_is_started = 1;
-	_is_paused = 0;
+	m->is_started = 1;
 	return;
 
 err0:
@@ -481,16 +467,14 @@ _player_prev(Moedance *m)
 {
 	const PlaylistItem *const item = tui_playlist_prev(&m->tui);
 	if (item == NULL) {
-		_is_started = 0;
-		_is_paused = 0;
+		m->is_started = 0;
 		return;
 	}
 
 	if (player_item_play(&m->player, item->file_path) < 0)
 		goto err0;
 
-	_is_started = 1;
-	_is_paused = 0;
+	m->is_started = 1;
 	return;
 
 err0:

@@ -27,10 +27,11 @@
 /*
  * PlayerContext
  */
-static int  _context_init(PlayerContext *c, uint8_t swr_buffer[]);
+static int  _context_init(PlayerContext *c, uint8_t swr_buffer[], PaUtilRingBuffer *buffer);
 static int  _context_av_init(PlayerContext *c);
 static int  _context_swr_init(PlayerContext *c);
 static void _context_deinit(PlayerContext *c);
+static void _context_writer(PlayerContext *p);
 
 
 /*
@@ -41,8 +42,7 @@ static void _close_device(Player *p);
 static int  _stream_cb(const void *input, void *output, unsigned long count,
 		       const PaStreamCallbackTimeInfo *time_info,
 		       PaStreamCallbackFlags flags, void *udata);
-static int  _file_thrd(void *udata);
-static void _file_thrd_writer(Player *p);
+static int  _file_reader_thrd(void *udata);
 
 
 /*
@@ -52,6 +52,8 @@ int
 player_init(Player *p)
 {
 	memset(p, 0, sizeof(*p));
+	atomic_store(&p->is_paused, 1);
+	atomic_store(&p->context.is_stopped, 1);
 
 	uint8_t *const buffer = malloc(_RING_BUFFER_ELEM_SIZE * _RING_BUFFER_SIZE);
 	if (buffer == NULL) {
@@ -62,7 +64,7 @@ player_init(Player *p)
 	long ret = PaUtil_InitializeRingBuffer(&p->buffer, _RING_BUFFER_ELEM_SIZE,
 					       _RING_BUFFER_SIZE, buffer);
 	if (ret < 0) {
-		log_err(0, "player: player_init: PaUtil_InitializeRingBuffer");
+		log_err(0, "player: player_init: PaUtil_InitializeRingBuffer: invalid buffer size");
 		goto err0;
 	}
 	
@@ -71,13 +73,10 @@ player_init(Player *p)
 		log_err(errno, "player: player_init: malloc: swr buffer");
 		goto err0;
 	}
-	
-	atomic_store(&p->is_paused, 0);
-	atomic_store(&p->context.is_stopped, 1);
 
 	ret = _open_device(p);
 	if (ret < 0)
-		goto err1; // TODO
+		goto err1;
 
 	p->swr_buffer = swr_buffer;
 	return 0;
@@ -107,13 +106,11 @@ int
 player_item_play(Player *p, const char file[])
 {
 	PlayerContext *const c = &p->context;
-
-	atomic_store(&c->frames_total, 0);
 	if (atomic_load(&c->is_stopped) == 0)
 		player_item_stop(p);
 
 	c->file = file;
-	if (thrd_create(&c->thrd, _file_thrd, p) != thrd_success) {
+	if (thrd_create(&c->thrd, _file_reader_thrd, p) != thrd_success) {
 		log_err(0, "player: player_item_play: thrd_create: failed");
 		return -1;
 	}
@@ -133,16 +130,17 @@ player_item_stop(Player *p)
 
 
 void
-player_item_pause(Player *p)
+player_item_toggle(Player *p)
 {
-	atomic_store(&p->is_paused, 1);
-}
+	if (atomic_load(&p->context.is_active) == 0) {
+		atomic_store(&p->is_paused, 1);
+		return;
+	}
 
-
-void
-player_item_resume(Player *p)
-{
-	atomic_store(&p->is_paused, 0);
+	if (atomic_load(&p->is_paused))
+		atomic_store(&p->is_paused, 0);
+	else
+		atomic_store(&p->is_paused, 1);
 }
 
 
@@ -165,7 +163,7 @@ player_item_is_stopped(Player *p)
  * Private
  */
 static int
-_context_init(PlayerContext *c, uint8_t swr_buffer[])
+_context_init(PlayerContext *c, uint8_t swr_buffer[], PaUtilRingBuffer *buffer)
 {
 	if (c->file == NULL) {
 		log_err(0, "player: _context_init: file == NULL");
@@ -195,6 +193,7 @@ _context_init(PlayerContext *c, uint8_t swr_buffer[])
 	c->pkt = pkt;
 	c->frame = frame;
 	c->swr_buffer = swr_buffer;
+	c->buffer = buffer;
 	atomic_store(&c->frames_total, 0);
 	return 0;
 	
@@ -273,8 +272,10 @@ static int
 _context_swr_init(PlayerContext *c)
 {
 	c->swr = swr_alloc();
-	if (c->swr == NULL)
-		return -1; // TODO
+	if (c->swr == NULL) {
+		log_err(0, "player: _context_swr_init: swr_alloc: failed");
+		return -1;
+	}
 	
 	AVChannelLayout chan;
 	av_channel_layout_default(&chan, _AUDIO_CHANNELS_COUNT);
@@ -285,7 +286,13 @@ _context_swr_init(PlayerContext *c)
 	av_opt_set_int(c->swr, "in_sample_fmt", c->codec->sample_fmt, 0);
 	av_opt_set_int(c->swr, "in_sample_rate", c->codec->sample_rate, 0);
 
-	return swr_init(c->swr);
+	const int ret = swr_init(c->swr);
+	if (ret < 0) {
+		log_err(0, "player: _context_swr_init: swr_init: %s", av_err2str(ret));
+		return -1;
+	}
+
+	return 0;
 }
 
 
@@ -299,6 +306,51 @@ _context_deinit(PlayerContext *c)
 	swr_free(&c->swr);
 	av_frame_free(&c->frame);
 	av_packet_free(&c->pkt);
+}
+
+
+static void
+_context_writer(PlayerContext *c)
+{
+	AVCodecContext *const codec = c->codec;
+	AVFrame *const frm = c->frame;
+	SwrContext *const swr = c->swr;
+	uint8_t *const buffer = c->swr_buffer;
+	uint8_t *swr_buffer = buffer;
+
+
+	while (atomic_load(&c->is_active)) {
+		int ret = avcodec_receive_frame(codec, frm);
+		if (AVERROR(ret) == EAGAIN)
+			return;
+
+		if (ret < 0) {
+			log_err(0, "player: _context_writer: avcodec_receive_frame: %s", av_err2str(ret));
+			break;
+		}
+
+		ret = swr_convert(swr, &swr_buffer, _SWR_BUFFER_SIZE,
+				  (const uint8_t **)frm->data, frm->nb_samples);
+
+		while (ret > 0) {
+			if (PaUtil_GetRingBufferWriteAvailable(c->buffer) < ret) {
+				if (atomic_load(&c->is_active) == 0)
+					return;
+
+				// maybe this is not a good idea...
+				Pa_Sleep(_AUDIO_WAIT_TIME_MS);
+				continue;
+			}
+
+			PaUtil_WriteRingBuffer(c->buffer, buffer, ret);
+
+			// flushing...
+			ret = swr_convert(swr, &swr_buffer, _SWR_BUFFER_SIZE, NULL, 0);
+		}
+
+		if (ret < 0)
+			log_err(0, "player: _context_writer: swr_convert: %s", av_err2str(ret));
+	}
 }
 
 
@@ -405,15 +457,15 @@ _stream_cb(const void *input, void *output, unsigned long count,
 
 
 static int
-_file_thrd(void *udata)
+_file_reader_thrd(void *udata)
 {
 	Player *const p = (Player *)udata;
 	PlayerContext *const c = &p->context;
 
-
+	atomic_store(&p->is_paused, 0);
 	atomic_store(&c->is_active, 1);
 	atomic_store(&c->is_stopped, 0);
-	int ret = _context_init(c, p->swr_buffer);
+	int ret = _context_init(c, p->swr_buffer, &p->buffer);
 	if (ret < 0)
 		goto out0;
 
@@ -441,7 +493,7 @@ _file_thrd(void *udata)
 		
 		av_packet_unref(pkt);
 
-		_file_thrd_writer(p);
+		_context_writer(c);
 	}
 
 	while (atomic_load(&c->is_active)) {
@@ -452,61 +504,13 @@ _file_thrd(void *udata)
 		Pa_Sleep(_AUDIO_WAIT_TIME_MS);
 	}
 
-	atomic_store(&c->is_active, 0);
 	PaUtil_FlushRingBuffer(&p->buffer);
-
-	log_info("player: _file_thrd: exiting...");
 	_context_deinit(c);
 
 out0:
-	atomic_store(&c->frames_total, 0);
+	atomic_store(&c->is_active, 0);
+	atomic_store(&p->is_paused, 0);
 	atomic_store(&c->is_stopped, 1);
+	atomic_store(&c->frames_total, 0);
 	return 0;
-}
-
-
-static void
-_file_thrd_writer(Player *p)
-{
-	PlayerContext *const c = &p->context;
-
-	AVCodecContext *const codec = c->codec;
-	AVFrame *const frm = c->frame;
-	SwrContext *const swr = c->swr;
-	uint8_t *const buffer = c->swr_buffer;
-	uint8_t *swr_buffer = buffer;
-
-
-	while (atomic_load(&c->is_active)) {
-		int ret = avcodec_receive_frame(codec, frm);
-		if (AVERROR(ret) == EAGAIN)
-			return;
-
-		if (ret < 0) {
-			log_err(0, "player: _file_thrd_writer: avcodec_receive_frame: %s", av_err2str(ret));
-			break;
-		}
-		
-		ret = swr_convert(swr, &swr_buffer, _SWR_BUFFER_SIZE,
-				  (const uint8_t **)frm->data, frm->nb_samples);
-		
-		while (ret > 0) {
-			if (PaUtil_GetRingBufferWriteAvailable(&p->buffer) < ret) {
-				if (atomic_load(&c->is_active) == 0)
-					return;
-
-				// maybe this is not a good idea...
-				Pa_Sleep(_AUDIO_WAIT_TIME_MS);
-				continue;
-			}
-
-			PaUtil_WriteRingBuffer(&p->buffer, buffer, ret);
-
-			// flushing...
-			ret = swr_convert(swr, &swr_buffer, _SWR_BUFFER_SIZE, NULL, 0);
-		}
-
-		if (ret < 0)
-			log_err(0, "player: _file_thrd_writer: swr_convert: %s", av_err2str(ret));
-	}
 }
