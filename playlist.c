@@ -322,7 +322,10 @@ _load_files_meta(ArrayPtr *file_arr)
 	
 
 	const size_t len = file_arr->len;
-	const size_t count = (size_t)nprocs;
+	size_t count = (size_t)nprocs;
+	if (count > len)
+		count = len;
+
 	const size_t each = (len / count);
 	for (size_t i = 0; i < count; i++) {
 		ItemChunk *const c = &chunks[i];
