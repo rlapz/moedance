@@ -312,7 +312,9 @@ _load_files(Str *str, ArrayPtr *file_arr, const char path[], int max_depth)
 static int
 _load_files_meta(ArrayPtr *file_arr)
 {
-	int nprocs = get_nprocs();
+	int nprocs = CFG_FILE_META_THREADS_NUM;
+	if (nprocs <= 0)
+		nprocs = get_nprocs();
 	if (nprocs <= 0)
 		nprocs = 1;
 	

@@ -41,6 +41,11 @@
 #define CFG_LOG_FILE           "/tmp/moedance.log"
 #define CFG_PROBE_SCORE_MIN    (1)
 
+/*
+ * -1: default CPU count
+ */
+#define CFG_FILE_META_THREADS_NUM (1)
+
 
 #endif
 
