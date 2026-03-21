@@ -590,7 +590,7 @@ _set_header(Tui *t)
 	// row 1
 	str_append_fmt(str, "\x1b[%d;1H\x1b[1;" CFG_HEADER_COLOR_FG ";" CFG_HEADER_COLOR_BG "m\x1b[K",
 		       t->header_pos + 1);
-	str_append_fmt(str, "%s\x1b[K", "Title");
+	str_append_fmt(str, "%s\x1b[K", " Title");
 	str_append_fmt(str, "\x1b[%d;%dH * %s\x1b[K", t->header_pos + 1, 40, "Artist");
 	str_append_fmt(str, "\x1b[%d;%dH * %s\x1b[K", t->header_pos + 1, 80, "Album");
 	str_append_fmt(str, "\x1b[%d;%dH * %s\x1b[K", t->header_pos + 1, 120, "Genre");
