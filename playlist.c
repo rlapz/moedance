@@ -34,7 +34,7 @@ typedef struct item_chunk {
 
 static int  _verify(const char *name);
 static int  _item_new(PlaylistItem **new_item, const char path[], int path_len);
-static void _item_new_load(const char path[], int64_t *duration);
+static void _item_new_load(PlaylistItem *item);
 static int  _item_new_load_thrd(void *udata);
 static int  _sort_dir_cb(const struct dirent **a, const struct dirent **b);
 static void _load_files(Str *str, ArrayPtr *file_arr, const char path[], int max_depth);
@@ -156,34 +156,35 @@ _item_new(PlaylistItem **new_item, const char path[], int path_len)
 
 
 static void
-_item_new_load(const char path[], int64_t *duration)
+_item_new_load(PlaylistItem *item)
 {
 	int ret;
 	AVFormatContext *ctx = NULL;
 #ifdef DEBUG
-	log_info("playlist: _item_new_load: \"%s\"", path);
+	log_info("playlist: _item_new_load: \"%s\"", item->file_path);
 #endif
 
-	ret = avformat_open_input(&ctx, path, NULL, NULL);
+	ret = avformat_open_input(&ctx, item->file_path, NULL, NULL);
 	if (ret < 0) {
-		log_err(0, "playlist: _item_new_load: avformat_open_input: \"%s\": %s", path, av_err2str(ret));
+		log_err(0, "playlist: _item_new_load: avformat_open_input: \"%s\": %s",
+			item->file_path, av_err2str(ret));
 		return;
 	}
 
 	if (ctx->probe_score <= CFG_PROBE_SCORE_MIN) {
-		log_err(0, "playlist: _item_new_load: probe_score \"%s\": %d <= %d", path, ctx->probe_score,
-			CFG_PROBE_SCORE_MIN);
+		log_err(0, "playlist: _item_new_load: probe_score \"%s\": %d <= %d",
+			item->file_path, ctx->probe_score, CFG_PROBE_SCORE_MIN);
 		goto out0;
 	}
 
 	ret = avformat_find_stream_info(ctx, NULL);
 	if (ret < 0) {
-		log_err(0, "playlist: _item_new_load: avformat_find_stream_info: \"%s\": %s", path,
-			av_err2str(ret));
+		log_err(0, "playlist: _item_new_load: avformat_find_stream_info: \"%s\": %s",
+			item->file_path, av_err2str(ret));
 		goto out0;
 	}
 
-	*duration = ctx->duration / AV_TIME_BASE;
+	item->duration = ctx->duration / AV_TIME_BASE;
 
 out0:
 	avformat_close_input(&ctx);
@@ -194,10 +195,8 @@ static int
 _item_new_load_thrd(void *udata)
 {
 	ItemChunk *const chunk = (ItemChunk *)udata;
-	for (int i = 0; i < chunk->len; i++) {
-		PlaylistItem *const p = chunk->list[i];
-		_item_new_load(p->file_path, &p->duration);
-	}
+	for (int i = 0; i < chunk->len; i++)
+		_item_new_load(chunk->list[i]);
 
 	return 0;
 }
