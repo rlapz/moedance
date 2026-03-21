@@ -98,10 +98,18 @@ playlist_deinit(Playlist *p)
 	PlaylistItem **const items = p->items;
 	for (int i = 0; i < p->items_len; i++) {
 		PlaylistItem *const itm = items[i];
+#if (CFG_META_TITLE_ENABLE == 1)
 		free(itm->title);
+#endif
+#if (CFG_META_ARTIST_ENABLE == 1)
 		free(itm->artist);
+#endif
+#if (CFG_META_ALBUM_ENABLE == 1)
 		free(itm->album);
+#endif
+#if (CFG_META_GENRE_ENABLE == 1)
 		free(itm->genre);
+#endif
 		free(itm);
 	}
 

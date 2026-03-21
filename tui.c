@@ -539,7 +539,7 @@ _add_playlist_item(Tui *t, int idx, int pos)
 	Str *const str = &t->buffer;
 	const PlaylistItem *const item = t->playlist.items[idx];
 	const char *const duration = cstr_time_fmt(buff, sizeof(buff), item->duration);
-	const int dpos = t->width - (int)strlen(duration) - 3;
+	const int dpos = t->width - (int)strlen(duration) - 2;
 	if (dpos < 0)
 		return;
 
@@ -558,12 +558,28 @@ _add_playlist_item(Tui *t, int idx, int pos)
 	else
 		str_append_fmt(str, "\x1b[%d;" CFG_BODY_COLOR_FG ";" CFG_BODY_COLOR_BG "m\x1b[K", is_bld);
 
-	str_append_fmt(str, "%c%s\x1b[K", flag, (item->title != NULL)? item->title : "-");
-	str_append_fmt(str, "\x1b[%d;%dH │ %s\x1b[K", pos, 40, (item->artist != NULL)? item->artist : "-");
-	str_append_fmt(str, "\x1b[%d;%dH │ %s\x1b[K", pos, 80, (item->album != NULL)? item->album : "-");
-	str_append_fmt(str, "\x1b[%d;%dH │ %s\x1b[K", pos, 120, (item->genre != NULL)? item->genre : "-");
-	str_append_fmt(str, "\x1b[%d;%dH │ %s\x1b[K", pos, 160, item->name);
-	str_append_fmt(str, "\x1b[%d;%dH │ %s \x1b[m", pos, dpos, duration);
+	str_append_fmt(str, "%c\x1b[K", flag);
+
+	int col = 2;
+#if (CFG_META_TITLE_ENABLE == 1)
+	str_append_fmt(str, "\x1b[%d;%dH│ %s\x1b[K", pos, col, ALT_NULL(item->title, "-"));
+	col += CFG_META_TITLE_WIDTH;
+#endif
+#if (CFG_META_ARTIST_ENABLE == 1)
+	str_append_fmt(str, "\x1b[%d;%dH│ %s\x1b[K", pos, col, ALT_NULL(item->artist, "-"));
+	col += CFG_META_ARTIST_WIDTH;
+#endif
+#if (CFG_META_ALBUM_ENABLE == 1)
+	str_append_fmt(str, "\x1b[%d;%dH│ %s\x1b[K", pos, col, ALT_NULL(item->album, "-"));
+	col += CFG_META_ALBUM_WIDTH;
+#endif
+#if (CFG_META_GENRE_ENABLE == 1)
+	str_append_fmt(str, "\x1b[%d;%dH│ %s\x1b[K", pos, col, ALT_NULL(item->genre, "-"));
+	col += CFG_META_GENRE_WIDTH;
+#endif
+
+	str_append_fmt(str, "\x1b[%d;%dH│ %s\x1b[K", pos, col, item->name);
+	str_append_fmt(str, "\x1b[%d;%dH│ %s \x1b[m", pos, dpos, duration);
 }
 
 
@@ -588,14 +604,29 @@ _set_header(Tui *t)
 	str_append_fmt(str, "\x1b[%d;%dH " CFG_HEADER_LABEL " [%u/%u]\x1b[m", t->header_pos, cpos, curr, len);
 
 	// row 1
-	str_append_fmt(str, "\x1b[%d;1H\x1b[1;" CFG_HEADER_COLOR_FG ";" CFG_HEADER_COLOR_BG "m\x1b[K",
-		       t->header_pos + 1);
-	str_append_fmt(str, "%s\x1b[K", " Title");
-	str_append_fmt(str, "\x1b[%d;%dH * %s\x1b[K", t->header_pos + 1, 40, "Artist");
-	str_append_fmt(str, "\x1b[%d;%dH * %s\x1b[K", t->header_pos + 1, 80, "Album");
-	str_append_fmt(str, "\x1b[%d;%dH * %s\x1b[K", t->header_pos + 1, 120, "Genre");
-	str_append_fmt(str, "\x1b[%d;%dH * %s\x1b[K", t->header_pos + 1, 160, "File");
-	str_append_fmt(str, "\x1b[%d;%dH * %s\x1b[K\x1b[m", t->header_pos + 1, dpos, "Duration");
+	const int pos = t->header_pos + 1;
+	str_append_fmt(str, "\x1b[%d;1H\x1b[1;" CFG_HEADER_COLOR_FG ";" CFG_HEADER_COLOR_BG "m\x1b[K", pos);
+
+	int col = 1;
+#if (CFG_META_TITLE_ENABLE == 1)
+	str_append_fmt(str, "\x1b[%d;%dH * %s\x1b[K", pos, col, " Title");
+	col += CFG_META_TITLE_WIDTH;
+#endif
+#if (CFG_META_ARTIST_ENABLE == 1)
+	str_append_fmt(str, "\x1b[%d;%dH * %s\x1b[K", pos, col, "Artist");
+	col += CFG_META_ARTIST_WIDTH;
+#endif
+#if (CFG_META_ALBUM_ENABLE == 1)
+	str_append_fmt(str, "\x1b[%d;%dH * %s\x1b[K", pos, col, "Album");
+	col += CFG_META_ALBUM_WIDTH;
+#endif
+#if (CFG_META_GENRE_ENABLE == 1)
+	str_append_fmt(str, "\x1b[%d;%dH * %s\x1b[K", pos, col, "Genre");
+	col += CFG_META_GENRE_WIDTH;
+#endif
+
+	str_append_fmt(str, "\x1b[%d;%dH * %s\x1b[K", pos, col, "File");
+	str_append_fmt(str, "\x1b[%d;%dH * %s\x1b[K\x1b[m", pos, dpos, "Duration");
 }
 
 
