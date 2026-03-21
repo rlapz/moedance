@@ -202,19 +202,29 @@ _item_new_load(PlaylistItem *item)
 		goto out0;
 	}
 
-	AVDictionaryEntry * ent = av_dict_get(ctx->metadata, "title", NULL, 0);
+	AVDictionaryEntry *ent;
+#if (CFG_META_TITLE_ENABLE == 1)
+	ent = av_dict_get(ctx->metadata, "title", NULL, 0);
 	if (ent != NULL)
 		item->title = strdup(ent->value);
+#endif
+#if (CFG_META_ARTIST_ENABLE == 1)
 	ent = av_dict_get(ctx->metadata, "artist", NULL, 0);
 	if (ent != NULL)
 		item->artist = strdup(ent->value);
+#endif
+#if (CFG_META_ALBUM_ENABLE == 1)
 	ent = av_dict_get(ctx->metadata, "album", NULL, 0);
 	if (ent != NULL)
 		item->album = strdup(ent->value);
+#endif
+#if (CFG_META_GENRE_ENABLE == 1)
 	ent = av_dict_get(ctx->metadata, "genre", NULL, 0);
 	if (ent != NULL)
 		item->genre = strdup(ent->value);
+#endif
 
+	(void)ent;
 	item->duration = ctx->duration / AV_TIME_BASE;
 
 out0:
