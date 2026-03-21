@@ -12,6 +12,7 @@
 	"flac",			\
 	"wav",			\
 	"m4a",			\
+	"opus",			\
 	/* "mp4", */			\
 	/* "aac", */			\
 	/* "amr", */			\
@@ -21,7 +22,7 @@
 
 /*
  * metadata
- *  1 = true, otherwise false
+ * enable; 1 = true, otherwise false
  */
 #define CFG_META_TITLE_ENABLE  (1)
 #define CFG_META_TITLE_WIDTH   (45)

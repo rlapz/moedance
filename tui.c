@@ -609,7 +609,7 @@ _set_header(Tui *t)
 
 	int col = 1;
 #if (CFG_META_TITLE_ENABLE == 1)
-	str_append_fmt(str, "\x1b[%d;%dH * %s\x1b[K", pos, col, " Title");
+	str_append_fmt(str, "\x1b[%d;%dH * %s\x1b[K", pos, col, "Title");
 	col += CFG_META_TITLE_WIDTH;
 #endif
 #if (CFG_META_ARTIST_ENABLE == 1)
