@@ -7,6 +7,10 @@
 
 typedef struct playlist_item {
 	const char *name;
+	char       *title;
+	char       *artist;
+	char       *album;
+	char       *genre;
 	int64_t     duration;
 	char        file_path[];
 } PlaylistItem;

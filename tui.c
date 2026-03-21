@@ -482,7 +482,7 @@ _resize(Tui *t)
 	t->width = ws.ws_col;
 	t->height = ws.ws_row;
 	t->header_pos = 1;
-	t->body_pos = t->header_pos + 1;
+	t->body_pos = t->header_pos + 2;
 	t->footer_pos = t->height;
 }
 
@@ -558,7 +558,11 @@ _add_playlist_item(Tui *t, int idx, int pos)
 	else
 		str_append_fmt(str, "\x1b[%d;" CFG_BODY_COLOR_FG ";" CFG_BODY_COLOR_BG "m\x1b[K", is_bld);
 
-	str_append_fmt(str, "%c%s", flag, item->name);
+	str_append_fmt(str, "%c%s\x1b[K", flag, (item->title != NULL)? item->title : "-");
+	str_append_fmt(str, "\x1b[%d;%dH │ %s\x1b[K", pos, 40, (item->artist != NULL)? item->artist : "-");
+	str_append_fmt(str, "\x1b[%d;%dH │ %s\x1b[K", pos, 80, (item->album != NULL)? item->album : "-");
+	str_append_fmt(str, "\x1b[%d;%dH │ %s\x1b[K", pos, 120, (item->genre != NULL)? item->genre : "-");
+	str_append_fmt(str, "\x1b[%d;%dH │ %s\x1b[K", pos, 160, item->name);
 	str_append_fmt(str, "\x1b[%d;%dH │ %s \x1b[m", pos, dpos, duration);
 }
 
@@ -574,10 +578,24 @@ _set_header(Tui *t)
 	Str *const str = &t->buffer;
 	const int clen = snprintf(NULL, 0, CFG_HEADER_LABEL " [%u/%u]", curr, len);
 	const int cpos = t->width - clen;
+	int dpos = t->width - (14 - 3);
+	if (dpos < 0)
+		dpos = 201;
 
+	// row 0
 	str_append_fmt(str, "\x1b[%d;1H\x1b[1;" CFG_HEADER_COLOR_FG ";" CFG_HEADER_COLOR_BG "m\x1b[K%s",
 		       t->header_pos, t->root_dir);
 	str_append_fmt(str, "\x1b[%d;%dH " CFG_HEADER_LABEL " [%u/%u]\x1b[m", t->header_pos, cpos, curr, len);
+
+	// row 1
+	str_append_fmt(str, "\x1b[%d;1H\x1b[1;" CFG_HEADER_COLOR_FG ";" CFG_HEADER_COLOR_BG "m\x1b[K",
+		       t->header_pos + 1);
+	str_append_fmt(str, "%s\x1b[K", "Title");
+	str_append_fmt(str, "\x1b[%d;%dH * %s\x1b[K", t->header_pos + 1, 40, "Artist");
+	str_append_fmt(str, "\x1b[%d;%dH * %s\x1b[K", t->header_pos + 1, 80, "Album");
+	str_append_fmt(str, "\x1b[%d;%dH * %s\x1b[K", t->header_pos + 1, 120, "Genre");
+	str_append_fmt(str, "\x1b[%d;%dH * %s\x1b[K", t->header_pos + 1, 160, "File");
+	str_append_fmt(str, "\x1b[%d;%dH * %s\x1b[K\x1b[m", t->header_pos + 1, dpos, "Duration");
 }
 
 
@@ -626,7 +644,7 @@ _set_footer(Tui *t)
 static inline int
 _get_playlist_relative_len(const Tui *t)
 {
-	return t->footer_pos - 2;
+	return t->footer_pos - 3;
 }
 
 
