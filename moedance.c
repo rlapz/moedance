@@ -11,6 +11,7 @@
 #include <threads.h>
 #include <time.h>
 
+#include <sys/epoll.h>
 #include <sys/stat.h>
 #include <sys/signalfd.h>
 #include <sys/timerfd.h>
@@ -225,66 +226,76 @@ _set_playlist(Moedance *m)
 static int
 _event_loop(Moedance *m)
 {
-	int ret = -1;
-	struct pollfd pfds[_EVENT_END];
+	int efd = epoll_create1(0);
+	if (efd < 0) {
+		log_err(errno, "moedance: _event_loop: epoll_create1");
+		return -1;
+	}
 
+	int ret = -1;
 	const int tfd = _timerfd_init(_TIMER_VALUE_S);
 	if (tfd < 0)
-		return -1;
+		goto out0;
 
-	pfds[_EVENT_KBD].fd = STDIN_FILENO;
-	pfds[_EVENT_KBD].events = POLLIN;
-	pfds[_EVENT_TIMER].fd = tfd;
-	pfds[_EVENT_TIMER].events = POLLIN;
 
+	const int kfd = STDIN_FILENO;
+	struct epoll_event events[] = {
+		[_EVENT_KBD] = {
+			.data = { .fd = kfd },
+			.events = EPOLLIN,
+		},
+		[_EVENT_TIMER] = {
+			.data = { .fd = tfd },
+			.events = EPOLLIN,
+		},
+	};
+
+	ret = epoll_ctl(efd, EPOLL_CTL_ADD, kfd, &events[0]);
+	if (ret < 0) {
+		log_err(errno, "moedance: _event_loop: epoll_ctl: kbd");
+		goto out0;
+	}
+
+	ret = epoll_ctl(efd, EPOLL_CTL_ADD, tfd, &events[1]);
+	if (ret < 0) {
+		log_err(errno, "moedance: _event_loop: epoll_ctl: timer");
+		goto out1;
+	}
 
 	/* flush input buffer */
-	stream_in_flush(pfds[_EVENT_KBD].fd);
+	stream_in_flush(kfd);
 
 	SET(m->flags, _FLAG_ALIVE);
+
+	struct epoll_event revents[2];
 	while (ISSET(m->flags, _FLAG_ALIVE)) {
-		int ret = poll(pfds, LEN(pfds), -1);
+		int ret = epoll_wait(efd, revents, LEN(revents), -1);
 		if (ret < 0) {
 			if (errno == EINTR)
 				continue;
 
-			log_err(errno, "moedance: _event_loop: poll");
-			goto out0;
+			log_err(errno, "moedance: _event_loop: epoll_wait");
+			goto out1;
 		}
 
-		for (int i = 0; i < _EVENT_END; i++) {
-			const short int rv = pfds[i].revents;
-			if (ISSET(rv, POLLHUP | POLLERR)) {
-				const char *revents_str = "???";
-				if (ISSET(rv, POLLHUP))
-					revents_str = "POLLHUP";
-				else if (ISSET(rv, POLLERR))
-					revents_str = "POLLERR";
+		for (int i = 0; i < ret; i++) {
+			const uint32_t rv = revents[i].events;
+			const int fd = revents[i].data.fd;
+			if ((fd == kfd) && ISSET(rv, EPOLLIN))
+				_event_kbd_handler(m, fd);
 
-				log_info("moedance: _event_loop: revents: %s", revents_str);
-				goto out0;
-			}
-
-			if (ISSET(rv, POLLIN) == 0)
-				continue;
-
-			switch (i) {
-			case _EVENT_KBD:
-				_event_kbd_handler(m, pfds[i].fd);
-				break;
-			case _EVENT_TIMER:
-				_event_timerfd_handler(m, pfds[i].fd);
-				break;
-			}
+			if ((fd == tfd) && ISSET(rv, EPOLLIN))
+				_event_timerfd_handler(m, fd);
 		}
 	}
 
 	tui_show_dialog(&m->tui, "Please wait...", TUI_DIALOG_TYPE_INFO);
 	ret = 0;
 
-out0:
+out1:
 	close(tfd);
-	UNSET(m->flags, _FLAG_ALIVE);
+out0:
+	close(efd);
 	return ret;
 }
 

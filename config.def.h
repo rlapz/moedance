@@ -54,6 +54,7 @@
 //#define CFG_FOOTER_COLOR_BG   "45"
 
 
+#define CFG_AUDIO_DEV_NAME     "moedance"
 #define CFG_DIR_RECURSIVE_SIZE (8)
 #define CFG_LOG_FILE           "/tmp/moedance.log"
 #define CFG_PROBE_SCORE_MIN    (1)

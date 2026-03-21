@@ -3,7 +3,6 @@
 
 
 #include <stdint.h>
-#include <poll.h>
 #include <threads.h>
 
 #include "tui.h"
