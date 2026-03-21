@@ -8,12 +8,14 @@
 #include <unistd.h>
 #include <threads.h>
 
+#include <pipewire/loop.h>
+
 #include "player.h"
 #include "util.h"
 
 
 #define _AUDIO_CHANNELS_COUNT		(2)
-#define _AUDIO_SAMPLE_FORMAT		paFloat32
+#define _AUDIO_SAMPLE_FORMAT		SPA_AUDIO_FORMAT_F32
 #define _AUDIO_SAMPLE_RATE		(44100)
 #define _AUDIO_FRAME_BUFFER_SIZE	(4096)
 #define _AUDIO_WAIT_TIME_MS		(100)
@@ -27,7 +29,7 @@
 /*
  * PlayerContext
  */
-static int  _context_init(PlayerContext *c, uint8_t swr_buffer[], PaUtilRingBuffer *buffer);
+static int  _context_init(PlayerContext *c, uint8_t swr_buffer[]);
 static int  _context_av_init(PlayerContext *c);
 static int  _context_swr_init(PlayerContext *c);
 static void _context_deinit(PlayerContext *c);
@@ -39,9 +41,7 @@ static void _context_writer(PlayerContext *p);
  */
 static int  _open_device(Player *p);
 static void _close_device(Player *p);
-static int  _stream_cb(const void *input, void *output, unsigned long count,
-		       const PaStreamCallbackTimeInfo *time_info,
-		       PaStreamCallbackFlags flags, void *udata);
+static void _stream_cb(void *udata);
 static int  _file_reader_thrd(void *udata);
 
 
@@ -61,12 +61,12 @@ player_init(Player *p)
 		return -1;
 	}
 	
-	long ret = PaUtil_InitializeRingBuffer(&p->buffer, _RING_BUFFER_ELEM_SIZE,
-					       _RING_BUFFER_SIZE, buffer);
-	if (ret < 0) {
-		log_err(0, "player: player_init: PaUtil_InitializeRingBuffer: invalid buffer size");
-		goto err0;
-	}
+	//long ret = PaUtil_InitializeRingBuffer(&p->buffer, _RING_BUFFER_ELEM_SIZE,
+	//				       _RING_BUFFER_SIZE, buffer);
+	//if (ret < 0) {
+	//	log_err(0, "player: player_init: PaUtil_InitializeRingBuffer: invalid buffer size");
+	//	goto err0;
+	//}
 	
 	uint8_t *const swr_buffer = malloc(_SWR_BUFFER_SIZE);
 	if (swr_buffer == NULL) {
@@ -74,7 +74,7 @@ player_init(Player *p)
 		goto err0;
 	}
 
-	ret = _open_device(p);
+	int ret = _open_device(p);
 	if (ret < 0)
 		goto err1;
 
@@ -93,12 +93,27 @@ void
 player_deinit(Player *p)
 {
 	atomic_store(&p->is_paused, 1);
-	Pa_StopStream(p->stream);
-	Pa_CloseStream(p->stream);
+	//Pa_StopStream(p->stream);
+	//Pa_CloseStream(p->stream);
 
 	_close_device(p);
-	free(p->buffer.buffer);
+	//free(p->buffer.buffer);
 	free(p->swr_buffer);
+}
+
+
+int
+player_get_fd(Player *p)
+{
+	return pw_loop_get_fd(p->pw_ctx);
+}
+
+
+int
+player_iterate(Player *p)
+{
+	pw_loop_iterate(p->pw_ctx, 0);
+	return 0;
 }
 
 
@@ -163,7 +178,7 @@ player_item_is_stopped(Player *p)
  * Private
  */
 static int
-_context_init(PlayerContext *c, uint8_t swr_buffer[], PaUtilRingBuffer *buffer)
+_context_init(PlayerContext *c, uint8_t swr_buffer[])
 {
 	if (c->file == NULL) {
 		log_err(0, "player: _context_init: file == NULL");
@@ -193,7 +208,7 @@ _context_init(PlayerContext *c, uint8_t swr_buffer[], PaUtilRingBuffer *buffer)
 	c->pkt = pkt;
 	c->frame = frame;
 	c->swr_buffer = swr_buffer;
-	c->buffer = buffer;
+	//c->buffer = buffer;
 	atomic_store(&c->frames_total, 0);
 	return 0;
 	
@@ -333,16 +348,17 @@ _context_writer(PlayerContext *c)
 				  (const uint8_t **)frm->data, frm->nb_samples);
 
 		while (ret > 0) {
-			if (PaUtil_GetRingBufferWriteAvailable(c->buffer) < ret) {
-				if (atomic_load(&c->is_active) == 0)
-					return;
+			//if (PaUtil_GetRingBufferWriteAvailable(c->buffer) < ret) {
+			//	if (atomic_load(&c->is_active) == 0)
+			//		return;
 
-				// maybe this is not a good idea...
-				Pa_Sleep(_AUDIO_WAIT_TIME_MS);
-				continue;
-			}
+			//	// maybe this is not a good idea...
+			//	Pa_Sleep(_AUDIO_WAIT_TIME_MS);
+			//	continue;
+			//}
 
-			PaUtil_WriteRingBuffer(c->buffer, buffer, ret);
+			//PaUtil_WriteRingBuffer(c->buffer, buffer, ret);
+
 
 			// flushing...
 			ret = swr_convert(swr, &swr_buffer, _SWR_BUFFER_SIZE, NULL, 0);
@@ -360,58 +376,59 @@ _context_writer(PlayerContext *c)
 static int
 _open_device(Player *p)
 {
-	PaError pe = Pa_Initialize();
-	if (pe != paNoError) {
-		log_err(0, "player: _open_device: Pa_Initialize: %s", Pa_GetErrorText(pe));
-		return -1;
-	}
-	
-	const int host_api = Pa_GetDefaultHostApi();
-	if (host_api < 0) {
-		log_err(0, "player: _open_device: Pa_GetDefaultHostApi: invalid index");
-		goto err0;
-	}
-	
-	const PaHostApiInfo *const host_api_info = Pa_GetHostApiInfo(host_api);
-	if (host_api_info == NULL) {
-		log_err(0, "player: _open_device: Pa_GetHostApiInfo: invalid index");
-		goto err0;
-	}
-	
-	const int device = host_api_info->defaultOutputDevice;
-	const PaDeviceInfo *const device_info = Pa_GetDeviceInfo(device);
-	if (device_info == NULL) {
-		log_err(0, "player: _open_device: Pa_GetDeviceInfo: invalid index");
-		goto err0;
-	}
-	
-	const PaStreamParameters param = {
-		.device = device,
-		.channelCount = _AUDIO_CHANNELS_COUNT,
-		.sampleFormat = _AUDIO_SAMPLE_FORMAT,
-		.suggestedLatency = device_info->defaultLowOutputLatency,
-	};
-
-	pe = Pa_OpenStream(&p->stream, NULL, &param, _AUDIO_SAMPLE_RATE,
-			   _AUDIO_FRAME_BUFFER_SIZE, paClipOff | paDitherOff,
-			   _stream_cb, p);
-	if (pe != paNoError) {
-		log_err(0, "player: _open_device: Pa_OpenStream: %s", Pa_GetErrorText(pe));
-		goto err0;
-	}
-	
-	pe = Pa_StartStream(p->stream);
-	if (pe != paNoError) {
-		log_err(0, "player: _open_device: Pa_StartStream: %s", Pa_GetErrorText(pe));
-		goto err1;
-	}
-
-	return 0;
-
-err1:
-	Pa_CloseStream(p->stream);
-err0:
-	Pa_Terminate();
+//	PaError pe = Pa_Initialize();
+//	if (pe != paNoError) {
+//		log_err(0, "player: _open_device: Pa_Initialize: %s", Pa_GetErrorText(pe));
+//		return -1;
+//	}
+//	
+//	const int host_api = Pa_GetDefaultHostApi();
+//	if (host_api < 0) {
+//		log_err(0, "player: _open_device: Pa_GetDefaultHostApi: invalid index");
+//		goto err0;
+//	}
+//	
+//	const PaHostApiInfo *const host_api_info = Pa_GetHostApiInfo(host_api);
+//	if (host_api_info == NULL) {
+//		log_err(0, "player: _open_device: Pa_GetHostApiInfo: invalid index");
+//		goto err0;
+//	}
+//	
+//	const int device = host_api_info->defaultOutputDevice;
+//	const PaDeviceInfo *const device_info = Pa_GetDeviceInfo(device);
+//	if (device_info == NULL) {
+//		log_err(0, "player: _open_device: Pa_GetDeviceInfo: invalid index");
+//		goto err0;
+//	}
+//	
+//	const PaStreamParameters param = {
+//		.device = device,
+//		.channelCount = _AUDIO_CHANNELS_COUNT,
+//		.sampleFormat = _AUDIO_SAMPLE_FORMAT,
+//		.suggestedLatency = device_info->defaultLowOutputLatency,
+//	};
+//
+//	pe = Pa_OpenStream(&p->stream, NULL, &param, _AUDIO_SAMPLE_RATE,
+//			   _AUDIO_FRAME_BUFFER_SIZE, paClipOff | paDitherOff,
+//			   _stream_cb, p);
+//	if (pe != paNoError) {
+//		log_err(0, "player: _open_device: Pa_OpenStream: %s", Pa_GetErrorText(pe));
+//		goto err0;
+//	}
+//	
+//	pe = Pa_StartStream(p->stream);
+//	if (pe != paNoError) {
+//		log_err(0, "player: _open_device: Pa_StartStream: %s", Pa_GetErrorText(pe));
+//		goto err1;
+//	}
+//
+//	return 0;
+//
+//err1:
+//	Pa_CloseStream(p->stream);
+//err0:
+//	Pa_Terminate();
+//	return -1;
 	return -1;
 }
 
@@ -419,40 +436,48 @@ err0:
 static void
 _close_device(Player *p)
 {
-	Pa_Terminate();
+	//Pa_Terminate();
 	(void)p;
 }
 
 
-static int
-_stream_cb(const void *input, void *output, unsigned long count,
-	   const PaStreamCallbackTimeInfo *time_info, PaStreamCallbackFlags flags,
-	   void *udata)
+//static int
+//_stream_cb(const void *input, void *output, unsigned long count,
+//	   const PaStreamCallbackTimeInfo *time_info, PaStreamCallbackFlags flags,
+//	   void *udata)
+//{
+//	Player *const p = (Player *)udata;
+//	size_t silent_offt = 0;
+//	size_t silent_size = 0;
+//
+//	if (atomic_load(&p->is_paused) == 0) {
+//		const long rd = PaUtil_ReadRingBuffer(&p->buffer, output, count);
+//		if (rd > 0) {
+//			const size_t old = atomic_load(&p->context.frames_total);
+//			atomic_store(&p->context.frames_total, old + (size_t) rd);
+//		}
+//
+//		silent_offt = (rd * _RING_BUFFER_ELEM_SIZE);
+//		silent_size = (count - rd) * _RING_BUFFER_ELEM_SIZE;
+//	} else {
+//		// shut up!
+//		silent_size = (count * _RING_BUFFER_ELEM_SIZE);
+//	}
+//
+//	memset(((char *)output) + silent_offt, 0, silent_size);
+//
+//	(void)input;
+//	(void)time_info;
+//	(void)flags;
+//	return paContinue;
+//}
+
+
+static void
+_stream_cb(void *udata)
 {
 	Player *const p = (Player *)udata;
-	size_t silent_offt = 0;
-	size_t silent_size = 0;
-
-	if (atomic_load(&p->is_paused) == 0) {
-		const long rd = PaUtil_ReadRingBuffer(&p->buffer, output, count);
-		if (rd > 0) {
-			const size_t old = atomic_load(&p->context.frames_total);
-			atomic_store(&p->context.frames_total, old + (size_t) rd);
-		}
-
-		silent_offt = (rd * _RING_BUFFER_ELEM_SIZE);
-		silent_size = (count - rd) * _RING_BUFFER_ELEM_SIZE;
-	} else {
-		// shut up!
-		silent_size = (count * _RING_BUFFER_ELEM_SIZE);
-	}
-
-	memset(((char *)output) + silent_offt, 0, silent_size);
-
-	(void)input;
-	(void)time_info;
-	(void)flags;
-	return paContinue;
+	//pw_stream_deque_buffer();
 }
 
 
@@ -465,7 +490,8 @@ _file_reader_thrd(void *udata)
 	atomic_store(&p->is_paused, 0);
 	atomic_store(&c->is_active, 1);
 	atomic_store(&c->is_stopped, 0);
-	int ret = _context_init(c, p->swr_buffer, &p->buffer);
+	//int ret = _context_init(c, p->swr_buffer, &p->buffer);
+	int ret = _context_init(c, p->swr_buffer);
 	if (ret < 0)
 		goto out0;
 
@@ -498,13 +524,14 @@ _file_reader_thrd(void *udata)
 
 	while (atomic_load(&c->is_active)) {
 		// make sure there is no data left
-		if (PaUtil_GetRingBufferReadAvailable(&p->buffer) == 0)
-			break;
+		//if (PaUtil_GetRingBufferReadAvailable(&p->buffer) == 0)
+		//	break;
 		
-		Pa_Sleep(_AUDIO_WAIT_TIME_MS);
+		//Pa_Sleep(_AUDIO_WAIT_TIME_MS);
+		sleep(1);
 	}
 
-	PaUtil_FlushRingBuffer(&p->buffer);
+	//PaUtil_FlushRingBuffer(&p->buffer);
 	_context_deinit(c);
 
 out0:
