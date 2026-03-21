@@ -96,8 +96,22 @@ void
 playlist_deinit(Playlist *p)
 {
 	PlaylistItem **const items = p->items;
-	for (int i = 0; i < p->items_len; i++)
-		free(items[i]);
+	for (int i = 0; i < p->items_len; i++) {
+		PlaylistItem *const itm = items[i];
+#if (CFG_META_TITLE_ENABLE == 1)
+		free(itm->title);
+#endif
+#if (CFG_META_ARTIST_ENABLE == 1)
+		free(itm->artist);
+#endif
+#if (CFG_META_ALBUM_ENABLE == 1)
+		free(itm->album);
+#endif
+#if (CFG_META_GENRE_ENABLE == 1)
+		free(itm->genre);
+#endif
+		free(itm);
+	}
 
 	free(p->items);
 }
@@ -149,6 +163,10 @@ _item_new(PlaylistItem **new_item, const char path[], int path_len)
 		item->name = item->file_path;
 #endif
 
+	item->title = NULL;
+	item->artist = NULL;
+	item->album = NULL;
+	item->genre = NULL;
 	item->duration = 0;
 	*new_item = item;
 	return 0;
@@ -183,6 +201,19 @@ _item_new_load(PlaylistItem *item)
 			item->file_path, av_err2str(ret));
 		goto out0;
 	}
+
+	AVDictionaryEntry * ent = av_dict_get(ctx->metadata, "title", NULL, 0);
+	if (ent != NULL)
+		item->title = strdup(ent->value);
+	ent = av_dict_get(ctx->metadata, "artist", NULL, 0);
+	if (ent != NULL)
+		item->artist = strdup(ent->value);
+	ent = av_dict_get(ctx->metadata, "album", NULL, 0);
+	if (ent != NULL)
+		item->album = strdup(ent->value);
+	ent = av_dict_get(ctx->metadata, "genre", NULL, 0);
+	if (ent != NULL)
+		item->genre = strdup(ent->value);
 
 	item->duration = ctx->duration / AV_TIME_BASE;
 

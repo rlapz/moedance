@@ -20,6 +20,23 @@
 
 
 /*
+ * metadata
+ *  1 = true, otherwise false
+ */
+#define CFG_META_TITLE_ENABLE  (1)
+#define CFG_META_TITLE_WIDTH   (45)
+
+#define CFG_META_ARTIST_ENABLE (1)
+#define CFG_META_ARTIST_WIDTH  (35)
+
+#define CFG_META_ALBUM_ENABLE  (1)
+#define CFG_META_ALBUM_WIDTH   (35)
+
+#define CFG_META_GENRE_ENABLE  (1)
+#define CFG_META_GENRE_WIDTH   (30)
+
+
+/*
  * colors
  * see: https://en.wikipedia.org/wiki/ANSI_escape_code
  */
