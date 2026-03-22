@@ -12,7 +12,8 @@
 #define UNSET(X, F) (X &= ~(F))
 #define ISSET(X, F) (X & (F))
 
-#define ALT_NULL(X, Y) ((X != NULL)? X : Y)
+#define ALT_NULL(X, Y)  ((X != NULL)? X : Y)
+#define ALT_EMPTY(X, Y) ((X[0] != '\0')? X : Y)
 
 
 /*

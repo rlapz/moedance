@@ -562,19 +562,19 @@ _add_playlist_item(Tui *t, int idx, int pos)
 
 	int col = 2;
 #if (CFG_META_TITLE_ENABLE == 1)
-	str_append_fmt(str, "\x1b[%d;%dH│ %s\x1b[K", pos, col, ALT_NULL(item->title, "-"));
+	str_append_fmt(str, "\x1b[%d;%dH│ %s\x1b[K", pos, col, ALT_EMPTY(item->title, "-"));
 	col += CFG_META_TITLE_WIDTH;
 #endif
 #if (CFG_META_ARTIST_ENABLE == 1)
-	str_append_fmt(str, "\x1b[%d;%dH│ %s\x1b[K", pos, col, ALT_NULL(item->artist, "-"));
+	str_append_fmt(str, "\x1b[%d;%dH│ %s\x1b[K", pos, col, ALT_EMPTY(item->artist, "-"));
 	col += CFG_META_ARTIST_WIDTH;
 #endif
 #if (CFG_META_ALBUM_ENABLE == 1)
-	str_append_fmt(str, "\x1b[%d;%dH│ %s\x1b[K", pos, col, ALT_NULL(item->album, "-"));
+	str_append_fmt(str, "\x1b[%d;%dH│ %s\x1b[K", pos, col, ALT_EMPTY(item->album, "-"));
 	col += CFG_META_ALBUM_WIDTH;
 #endif
 #if (CFG_META_GENRE_ENABLE == 1)
-	str_append_fmt(str, "\x1b[%d;%dH│ %s\x1b[K", pos, col, ALT_NULL(item->genre, "-"));
+	str_append_fmt(str, "\x1b[%d;%dH│ %s\x1b[K", pos, col, ALT_EMPTY(item->genre, "-"));
 	col += CFG_META_GENRE_WIDTH;
 #endif
 

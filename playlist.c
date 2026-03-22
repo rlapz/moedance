@@ -39,6 +39,7 @@ static int  _item_new_load_thrd(void *udata);
 static int  _sort_dir_cb(const struct dirent **a, const struct dirent **b);
 static void _load_files(Str *str, ArrayPtr *file_arr, const char path[], int max_depth);
 static int  _load_files_meta(ArrayPtr *file_arr);
+static void _cstr_copy(char dest[], size_t size, const char src[]);
 
 
 /*
@@ -96,22 +97,8 @@ void
 playlist_deinit(Playlist *p)
 {
 	PlaylistItem **const items = p->items;
-	for (int i = 0; i < p->items_len; i++) {
-		PlaylistItem *const itm = items[i];
-#if (CFG_META_TITLE_ENABLE == 1)
-		free(itm->title);
-#endif
-#if (CFG_META_ARTIST_ENABLE == 1)
-		free(itm->artist);
-#endif
-#if (CFG_META_ALBUM_ENABLE == 1)
-		free(itm->album);
-#endif
-#if (CFG_META_GENRE_ENABLE == 1)
-		free(itm->genre);
-#endif
-		free(itm);
-	}
+	for (int i = 0; i < p->items_len; i++)
+		free(items[i]);
 
 	free(p->items);
 }
@@ -163,10 +150,10 @@ _item_new(PlaylistItem **new_item, const char path[], int path_len)
 		item->name = item->file_path;
 #endif
 
-	item->title = NULL;
-	item->artist = NULL;
-	item->album = NULL;
-	item->genre = NULL;
+	item->title[0] = '\0';
+	item->artist[0] = '\0';
+	item->album[0] = '\0';
+	item->genre[0] = '\0';
 	item->duration = 0;
 	*new_item = item;
 	return 0;
@@ -206,22 +193,22 @@ _item_new_load(PlaylistItem *item)
 #if (CFG_META_TITLE_ENABLE == 1)
 	ent = av_dict_get(ctx->metadata, "title", NULL, 0);
 	if (ent != NULL)
-		item->title = strdup(ent->value);
+		_cstr_copy(item->title, PLAYLIST_ITEM_TITLE_SIZE, ent->value);
 #endif
 #if (CFG_META_ARTIST_ENABLE == 1)
 	ent = av_dict_get(ctx->metadata, "artist", NULL, 0);
 	if (ent != NULL)
-		item->artist = strdup(ent->value);
+		_cstr_copy(item->artist, PLAYLIST_ITEM_ARTIST_SIZE, ent->value);
 #endif
 #if (CFG_META_ALBUM_ENABLE == 1)
 	ent = av_dict_get(ctx->metadata, "album", NULL, 0);
 	if (ent != NULL)
-		item->album = strdup(ent->value);
+		_cstr_copy(item->album, PLAYLIST_ITEM_ALBUM_SIZE, ent->value);
 #endif
 #if (CFG_META_GENRE_ENABLE == 1)
 	ent = av_dict_get(ctx->metadata, "genre", NULL, 0);
 	if (ent != NULL)
-		item->genre = strdup(ent->value);
+		_cstr_copy(item->genre, PLAYLIST_ITEM_GENRE_SIZE, ent->value);
 #endif
 
 	(void)ent;
@@ -404,4 +391,24 @@ _load_files_meta(ArrayPtr *file_arr)
 
 	free(chunks);
 	return 0;
+}
+
+
+static void
+_cstr_copy(char dest[], size_t size, const char src[])
+{
+	const size_t src_len = strlen(src);
+	cstr_copy_n(dest, size, src, src_len);
+	if (src_len < size)
+		return;
+
+	if (size <= 3) {
+		dest[0] = '\0';
+		return;
+	}
+
+	size_t end = size - 2;
+	dest[end--] = '.';
+	dest[end--] = '.';
+	dest[end] = '.';
 }
