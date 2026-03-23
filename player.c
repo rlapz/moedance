@@ -53,6 +53,7 @@ player_init(Player *p)
 {
 	memset(p, 0, sizeof(*p));
 	atomic_store(&p->is_paused, 1);
+	atomic_store(&p->context.is_active, 0);
 	atomic_store(&p->context.is_stopped, 1);
 
 	uint8_t *const buffer = malloc(_RING_BUFFER_ELEM_SIZE * _RING_BUFFER_SIZE);
@@ -123,6 +124,8 @@ void
 player_item_stop(Player *p)
 {
 	PlayerContext *const c = &p->context;
+	if (atomic_load(&c->is_active) == 0)
+		return;
 
 	atomic_store(&c->is_active, 0);
 	thrd_join(c->thrd, NULL);
