@@ -321,6 +321,7 @@ _event_kbd_handler(Moedance *m, int fd)
 	case KBD_END: tui_playlist_bottom(&m->tui); break;
 	case KBD_PAGE_UP: tui_playlist_page_up(&m->tui); break;
 	case KBD_PAGE_DOWN: tui_playlist_page_down(&m->tui); break;
+	case KBD_SLASH: tui_playlist_find(&m->tui); break;
 	case KBD_SPACE: _player_toggle(m); break;
 	case KBD_ENTER: _player_play(m); break;
 	case KBD_N: _player_next(m); break;

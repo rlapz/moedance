@@ -15,6 +15,12 @@
 
 
 enum {
+	_STATE_NORMAL,
+	_STATE_FINDING,
+};
+
+
+enum {
 	_PLAYER_STATE_STOPPED,
 	_PLAYER_STATE_PLAYING,
 	_PLAYER_STATE_PAUSED,
@@ -41,6 +47,8 @@ static void _draw_end(Tui *t);
 static void _clear(Tui *t);
 static void _resize(Tui *t);
 static int  _raw_mode(Tui *t);
+static int _set_echo(Tui *t, int is_enable);
+
 static void _add_playlist_item(Tui *t, int idx, int pos);
 static void _set_header(Tui *t);
 static void _set_body(Tui *t);
@@ -72,6 +80,7 @@ tui_init(Tui *t, const char root_dir[])
 	if (_raw_mode(t) < 0)
 		goto err1;
 
+	t->state = _STATE_NORMAL;
 	t->root_dir = root_dir;
 	t->playlist.state = _PLAYER_STATE_STOPPED;
 	t->playlist.top = 0;
@@ -116,7 +125,7 @@ tui_deinit(Tui *t)
 	_draw_end(t);
 
 	/* restore termios */
-	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &t->termios_orig) < 0)
+	if (tcsetattr(t->tty_fd, TCSAFLUSH, &t->termios_orig) < 0)
 		log_err(errno, "tui: tui_deinit: tcsetattr");
 
 	str_deinit(str);
@@ -311,6 +320,17 @@ tui_playlist_bottom(Tui *t)
 }
 
 
+void
+tui_playlist_find(Tui *t)
+{
+	if (t->state != _STATE_NORMAL)
+		return;
+
+	t->state = _STATE_FINDING;
+	_set_echo(t, 1);
+}
+
+
 const PlaylistItem *
 tui_playlist_play(Tui *t)
 {
@@ -491,7 +511,7 @@ static int
 _raw_mode(Tui *t)
 {
 	/* backup termios */
-	if (tcgetattr(STDIN_FILENO, &t->termios_orig) < 0) {
+	if (tcgetattr(t->tty_fd, &t->termios_orig) < 0) {
 		log_err(errno, "tui: _raw_mode: tcgetattr");
 		return -1;
 	}
@@ -504,7 +524,7 @@ _raw_mode(Tui *t)
 
 	termios.c_cc[VMIN]  = 0;
 	termios.c_cc[VTIME] = 1;
-	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &termios) < 0) {
+	if (tcsetattr(t->tty_fd, TCSAFLUSH, &termios) < 0) {
 		log_err(errno, "tui: _raw_mode: tcsetattr");
 		return -1;
 	}
@@ -528,6 +548,29 @@ _raw_mode(Tui *t)
 	str_append_n(str, "\x1b[?7l", 5);
 
 	_draw_end(t);
+	return 0;
+}
+
+
+static int
+_set_echo(Tui *t, int is_enable)
+{
+	TermIOS ios;
+	if (tcgetattr(t->tty_fd, &ios) < 0) {
+		log_err(errno, "tui: _set_echo: tcgetattr");
+		return -1;
+	}
+
+	if (is_enable)
+		SET(ios.c_lflag, ECHO);
+	else
+		UNSET(ios.c_lflag, ECHO);
+
+	if (tcsetattr(t->tty_fd, TCSAFLUSH, &ios) < 0) {
+		log_err(errno, "tui: _set_echo: tcsetattr");
+		return -1;
+	}
+
 	return 0;
 }
 
@@ -650,6 +693,11 @@ _set_footer(Tui *t)
 	if (t->playlist.items_len <= 0) {
 		str_append_fmt(str, "\x1b[%d;1H\x1b[1;" CFG_FOOTER_COLOR_FG ";" CFG_FOOTER_COLOR_BG
 			       "m\x1b[K> %s\x1b[m", t->footer_pos, "No Data!");
+		return;
+	}
+
+	if (t->state == _STATE_FINDING) {
+		str_append_fmt(str, "\x1b[%d;1HFind:", t->footer_pos);
 		return;
 	}
 
