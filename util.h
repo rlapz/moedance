@@ -22,6 +22,7 @@
 void  cstr_copy_n(char dest[], size_t dest_size, const char src[], size_t src_len);
 char *cstr_time_fmt(char dest[], size_t size, int64_t secs);
 int   cstr_cmp_vers(const char a[], const char b[]);
+char *cstr_case_str(const char h[], const char n[]);
 
 
 /*
@@ -44,6 +45,7 @@ const char *str_append(Str *s, const char cstr[]);
 const char *str_append_n(Str *s, const char cstr[], size_t len);
 const char *str_append_fmt(Str *s, const char fmt[], ...);
 char       *str_dup(Str *s);
+void        str_shrink(Str *s, size_t count);
 
 
 /*
@@ -63,6 +65,12 @@ int  array_ptr_append(ArrayPtr *a, void *item);
  * Stream
  */
 void stream_in_flush(int fd);
+
+
+/*
+ * misc
+ */
+int is_ascii(int c);
 
 
 /*

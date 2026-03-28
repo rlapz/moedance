@@ -59,6 +59,10 @@
 #define CFG_LOG_FILE           "/tmp/moedance.log"
 #define CFG_PROBE_SCORE_MIN    (1)
 
+
+#define CFG_FINDING_QUERY_SIZE (64)
+
+
 /*
  * -1: default CPU count
  */
