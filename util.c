@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <unistd.h>
 #include <time.h>
 #include <threads.h>
@@ -48,7 +49,7 @@ cstr_time_fmt(char dest[], size_t size, int64_t secs)
 
 
 /*
- * Copied from: https://git.musl-libc.org/cgit/musl/tree/src/string/strverscmp.c (MIT license)
+ * Copied from: https://git.musl-libc.org/cgit/musl/tree/src/string/strverscmp.c (MIT License)
  */
 int
 cstr_cmp_vers(const char a[], const char b[])
@@ -90,6 +91,18 @@ cstr_cmp_vers(const char a[], const char b[])
 	}
 
 	return l[i] - r[i];
+}
+
+
+/*
+ * Copied from: https://git.musl-libc.org/cgit/musl/tree/src/string/strcasestr.c (MIT License)
+ */
+char *
+cstr_case_str(const char h[], const char n[])
+{
+	size_t l = strlen(n);
+	for (; *h; h++) if (!strncasecmp(h, n, l)) return (char *)h;
+	return 0;
 }
 
 
@@ -325,6 +338,18 @@ str_dup(Str *s)
 }
 
 
+void
+str_shrink(Str *s, size_t count)
+{
+	if ((s->len == 0) || (count > s->len))
+		return;
+
+	const size_t new_len = s->len - count;
+	s->len = new_len;
+	s->cstr[new_len] = '\0';
+}
+
+
 /*
  * ArrayPtr
  */
@@ -367,6 +392,16 @@ stream_in_flush(int fd)
 	int c;
 	while (read(fd, &c, 1) > 0);
 	errno = 0;
+}
+
+
+/*
+ * misc
+ */
+int
+is_ascii(int c)
+{
+	return ((c > 31) && (c < 127));
 }
 
 

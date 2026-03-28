@@ -21,20 +21,15 @@ kbd_parse(const char raw[], int len)
 }
 
 
-int
-kbd_contains_special(const char raw[])
-{
-	return (raw[0] == '\x1b')? 1 : 0;
-}
-
-
 /*
  * private
  */
 static int
 _handle_special(const char raw[], int len)
 {
-	if (len <= 1)
+	if (len == 0)
+		return KBD_ESCAPE;
+	if (len == 1)
 		return KBD_UNKNOWN;
 
 	const char key0 = (raw[0] == 'O')? '[' : raw[0];

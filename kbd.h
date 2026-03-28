@@ -11,6 +11,7 @@ enum {
 	KBD_PAGE_DOWN,
 	KBD_HOME,
 	KBD_END,
+	KBD_ESCAPE,
 	KBD_ENTER,
 	KBD_BACKSPACE,
 	KBD_SPACE,
@@ -26,7 +27,6 @@ enum {
 
 
 int kbd_parse(const char raw[], int len);
-int kbd_contains_special(const char raw[]);
 
 
 #endif

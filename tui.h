@@ -22,6 +22,7 @@ typedef struct tui_playlist {
 	int                  state;
 	int                  top;
 	int                  curr;
+	int                  found;
 	int                  item_active;
 	int                  item_selected;
 	int64_t              item_duration;	/* min duration */
@@ -41,6 +42,7 @@ typedef struct tui {
 	const char  *root_dir;
 	TuiPlaylist  playlist;
 	Str          buffer;
+	Str          input_buffer;
 	int          tty_fd;
 	TermIOS      termios_orig;
 } Tui;
@@ -61,7 +63,12 @@ void tui_playlist_page_up(Tui *t);
 void tui_playlist_page_down(Tui *t);
 void tui_playlist_top(Tui *t);
 void tui_playlist_bottom(Tui *t);
-void tui_playlist_find(Tui *t);
+
+void tui_playlist_find_begin(Tui *t);
+void tui_playlist_find_query(Tui *t, const char query[], int len);
+void tui_playlist_find_next(Tui *t);
+void tui_playlist_find_prev(Tui *t);
+void tui_playlist_find_end(Tui *t);
 
 const PlaylistItem *tui_playlist_play(Tui *t);
 const PlaylistItem *tui_playlist_stop(Tui *t);

@@ -24,9 +24,11 @@
 
 
 enum {
-	_FLAG_ALIVE     = (1 << 0),
-	_FLAG_STARTED   = (1 << 1),
-	_FLAG_KEY_QUIT  = (1 << 2),
+	_FLAG_ALIVE         = (1 << 0),
+	_FLAG_STARTED       = (1 << 1),
+	_FLAG_KEY_QUIT      = (1 << 2),
+	_FLAG_FINDING_QUERY = (1 << 3),
+	_FLAG_FINDING_FIND  = (1 << 4),
 };
 
 enum {
@@ -51,6 +53,8 @@ static void _tui_refresh(Moedance *m);
 static void _tui_quit_dialog(Moedance *m);
 static void _tui_loading_dialog(Moedance *m);
 static void _tui_error_dialog(Moedance *m);
+static void _tui_playlist_find_begin(Moedance *m);
+static void _tui_playlist_find_end(Moedance *m);
 
 static void _player_play(Moedance *m);
 static void _player_stop(Moedance *m);
@@ -303,6 +307,54 @@ _event_kbd_handler(Moedance *m, int fd)
 		return;
 
 	const int kbd = kbd_parse(buffer, (int)rd);
+	if (ISSET(m->flags, _FLAG_FINDING_QUERY)) {
+		switch (kbd) {
+		case KBD_BACKSPACE:
+			// TODO: handle UTF-8
+			tui_playlist_find_query(&m->tui, buffer, -1);
+			break;
+		case KBD_ESCAPE:
+			_tui_playlist_find_end(m);
+			return;
+		case KBD_ENTER:
+			SET(m->flags, _FLAG_FINDING_FIND);
+			UNSET(m->flags, _FLAG_FINDING_QUERY);
+			tui_playlist_find_next(&m->tui);
+			return;
+		}
+
+		// TODO: handle UTF-8
+		if (is_ascii(buffer[0]) == 0)
+			return;
+
+		tui_playlist_find_query(&m->tui, buffer, (int)rd);
+		return;
+	}
+
+	if (ISSET(m->flags, _FLAG_FINDING_FIND)) {
+		switch (kbd) {
+		case KBD_Q:
+		case KBD_ESCAPE:
+			_tui_playlist_find_end(m);
+			break;
+		case KBD_N:
+			tui_playlist_find_next(&m->tui);
+			break;
+		case KBD_P:
+			tui_playlist_find_prev(&m->tui);
+			break;
+		case KBD_ENTER:
+			_player_play(m);
+			break;
+		case KBD_SLASH:
+			SET(m->flags, _FLAG_FINDING_QUERY);
+			UNSET(m->flags, _FLAG_FINDING_FIND);
+			break;
+		}
+
+		return;
+	}
+
 	if (ISSET(m->flags, _FLAG_KEY_QUIT)) {
 		if (kbd == KBD_Y) {
 			UNSET(m->flags, _FLAG_ALIVE);
@@ -321,7 +373,7 @@ _event_kbd_handler(Moedance *m, int fd)
 	case KBD_END: tui_playlist_bottom(&m->tui); break;
 	case KBD_PAGE_UP: tui_playlist_page_up(&m->tui); break;
 	case KBD_PAGE_DOWN: tui_playlist_page_down(&m->tui); break;
-	case KBD_SLASH: tui_playlist_find(&m->tui); break;
+	case KBD_SLASH: _tui_playlist_find_begin(m); break;
 	case KBD_SPACE: _player_toggle(m); break;
 	case KBD_ENTER: _player_play(m); break;
 	case KBD_N: _player_next(m); break;
@@ -395,6 +447,26 @@ static void
 _tui_error_dialog(Moedance *m)
 {
 	tui_show_dialog(&m->tui, "Error: see log file.", TUI_DIALOG_TYPE_ERROR);
+}
+
+
+static void
+_tui_playlist_find_begin(Moedance *m)
+{
+	if (m->playlist.items_len == 0)
+		return;
+
+	SET(m->flags, _FLAG_FINDING_QUERY);
+	tui_playlist_find_begin(&m->tui);
+}
+
+
+static void
+_tui_playlist_find_end(Moedance *m)
+{
+	UNSET(m->flags, _FLAG_FINDING_QUERY);
+	UNSET(m->flags, _FLAG_FINDING_FIND);
+	tui_playlist_find_end(&m->tui);
 }
 
 

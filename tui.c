@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
@@ -47,7 +48,6 @@ static void _draw_end(Tui *t);
 static void _clear(Tui *t);
 static void _resize(Tui *t);
 static int  _raw_mode(Tui *t);
-static int _set_echo(Tui *t, int is_enable);
 
 static void _add_playlist_item(Tui *t, int idx, int pos);
 static void _set_header(Tui *t);
@@ -56,6 +56,8 @@ static void _set_footer(Tui *t);
 static int  _get_playlist_relative_len(const Tui *t);
 static void _playlist_cursor(Tui *t, int step, int is_scroll);
 
+static int  _playlist_cmp(const PlaylistItem *pl, int idx, const char query[]);
+
 
 /*
  * public
@@ -63,28 +65,34 @@ static void _playlist_cursor(Tui *t, int step, int is_scroll);
 int
 tui_init(Tui *t, const char root_dir[])
 {
-	Str *const str = &t->buffer;
-	int ret = str_init_alloc(str, 4096);
+	int ret = str_init_alloc(&t->buffer, 4096);
 	if (ret < 0) {
-		log_err(ret, "tui: tui_init: str_init_alloc");
+		log_err(ret, "tui: tui_init: str_init_alloc: buffer");
 		return -1;
+	}
+
+	ret = str_init_alloc(&t->input_buffer, CFG_FINDING_QUERY_SIZE + 1);
+	if (ret < 0) {
+		log_err(ret, "tui: tui_init: str_init_alloc: input_buffer");
+		goto err0;
 	}
 
 	const int tty_fd = open("/dev/tty", O_WRONLY);
 	if (tty_fd < 0) {
 		log_err(errno, "tui: tui_init: open: /dev/tty");
-		goto err0;
+		goto err1;
 	}
 
 	t->tty_fd = tty_fd;
 	if (_raw_mode(t) < 0)
-		goto err1;
+		goto err2;
 
 	t->state = _STATE_NORMAL;
 	t->root_dir = root_dir;
 	t->playlist.state = _PLAYER_STATE_STOPPED;
 	t->playlist.top = 0;
 	t->playlist.curr = 0;
+	t->playlist.found = -1;
 	t->playlist.item_active = -1;
 	t->playlist.item_selected = 0;
 	t->playlist.item_duration = 0;
@@ -92,10 +100,12 @@ tui_init(Tui *t, const char root_dir[])
 	t->playlist.items_len = 0;
 	return 0;
 
-err1:
+err2:
 	close(tty_fd);
+err1:
+	str_deinit(&t->input_buffer);
 err0:
-	str_deinit(str);
+	str_deinit(&t->buffer);
 	return -1;
 }
 
@@ -129,6 +139,7 @@ tui_deinit(Tui *t)
 		log_err(errno, "tui: tui_deinit: tcsetattr");
 
 	str_deinit(str);
+	str_deinit(&t->input_buffer);
 
 	close(t->tty_fd);
 }
@@ -321,13 +332,80 @@ tui_playlist_bottom(Tui *t)
 
 
 void
-tui_playlist_find(Tui *t)
+tui_playlist_find_begin(Tui *t)
 {
 	if (t->state != _STATE_NORMAL)
 		return;
 
 	t->state = _STATE_FINDING;
-	_set_echo(t, 1);
+	t->playlist.found = -1;
+	str_set_n(&t->input_buffer, NULL, 0);
+
+	_draw_begin(t);
+	_set_footer(t);
+	_draw_end(t);
+}
+
+
+void
+tui_playlist_find_query(Tui *t, const char query[], int len)
+{
+	if (len < 0) {
+		// delete input buffer chars
+		str_shrink(&t->input_buffer, (size_t)(-len));
+	} else {
+		if (t->input_buffer.len >= CFG_FINDING_QUERY_SIZE)
+			return;
+
+		str_append_n(&t->input_buffer, query, (size_t)len);
+	}
+
+	_draw_begin(t);
+	_set_footer(t);
+	_draw_end(t);
+}
+
+
+void
+tui_playlist_find_next(Tui *t)
+{
+	TuiPlaylist *const p = &t->playlist;
+	const char *const query = t->input_buffer.cstr;
+
+	int start = p->found;
+	if (start < 0)
+		start = 0;
+	else if (start >= 0)
+		start++;
+
+	int idx = -1;
+	for (int i = start; i < p->items_len; i++) {
+		idx = _playlist_cmp(p->items[i], i, query);
+		if (idx >= 0)
+			break;
+	}
+
+	// TODO: print 'not found'
+	p->found = idx;
+}
+
+
+void
+tui_playlist_find_prev(Tui *t)
+{
+}
+
+
+void
+tui_playlist_find_end(Tui *t)
+{
+	t->state = _STATE_NORMAL;
+	t->playlist.found = -1;
+	str_set_n(&t->input_buffer, NULL, 0);
+
+	_draw_begin(t);
+	_set_footer(t);
+	_draw_end(t);
 }
 
 
@@ -552,29 +630,6 @@ _raw_mode(Tui *t)
 }
 
 
-static int
-_set_echo(Tui *t, int is_enable)
-{
-	TermIOS ios;
-	if (tcgetattr(t->tty_fd, &ios) < 0) {
-		log_err(errno, "tui: _set_echo: tcgetattr");
-		return -1;
-	}
-
-	if (is_enable)
-		SET(ios.c_lflag, ECHO);
-	else
-		UNSET(ios.c_lflag, ECHO);
-
-	if (tcsetattr(t->tty_fd, TCSAFLUSH, &ios) < 0) {
-		log_err(errno, "tui: _set_echo: tcsetattr");
-		return -1;
-	}
-
-	return 0;
-}
-
-
 static void
 _add_playlist_item(Tui *t, int idx, int pos)
 {
@@ -697,7 +752,9 @@ _set_footer(Tui *t)
 	}
 
 	if (t->state == _STATE_FINDING) {
-		str_append_fmt(str, "\x1b[%d;1HFind:", t->footer_pos);
+		str_append_fmt(str, "\x1b[%d;1H", t->footer_pos);
+		str_append_fmt(str, "\x1b[1;" CFG_FOOTER_COLOR_FG ";" CFG_FOOTER_COLOR_BG
+			       "m\x1b[K%s: %s", "Find", t->input_buffer.cstr);
 		return;
 	}
 
@@ -747,3 +804,16 @@ _playlist_cursor(Tui *t, int step, int is_scroll)
 	_draw_end(t);
 }
 
+
+static int
+_playlist_cmp(const PlaylistItem *pl, int idx, const char query[])
+{
+	if (cstr_case_str(pl->title, query) != NULL)
+		return idx;
+	if (cstr_case_str(pl->artist, query) != NULL)
+		return idx;
+	if (cstr_case_str(pl->file_path, query) != NULL)
+		return idx;
+	
+	return -1;
+}
