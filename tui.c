@@ -910,8 +910,6 @@ _playlist_cursor_at(Tui *t, int idx)
 	if (idx < 0)
 		return;
 
-	log_info("idx: %d: %s", idx, t->playlist.items[idx]->file_path);
-
 	const int end = _get_playlist_relative_len(t) - 1;
 	// scroll down
 	if (idx > (t->playlist.top + end))
