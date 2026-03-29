@@ -22,6 +22,13 @@ enum {
 
 
 enum {
+	_FOUND_BEGIN,
+	_FOUND_NOT_FOUND,
+	_FOUND_END,
+};
+
+
+enum {
 	_PLAYER_STATE_STOPPED,
 	_PLAYER_STATE_PLAYING,
 	_PLAYER_STATE_PAUSED,
@@ -55,6 +62,7 @@ static void _set_body(Tui *t);
 static void _set_footer(Tui *t);
 static int  _get_playlist_relative_len(const Tui *t);
 static void _playlist_cursor(Tui *t, int step, int is_scroll);
+static void _playlist_cursor_at(Tui *t, int idx);
 
 static int  _playlist_cmp(const PlaylistItem *pl, int idx, const char query[]);
 
@@ -92,7 +100,6 @@ tui_init(Tui *t, const char root_dir[])
 	t->playlist.state = _PLAYER_STATE_STOPPED;
 	t->playlist.top = 0;
 	t->playlist.curr = 0;
-	t->playlist.found = -1;
 	t->playlist.item_active = -1;
 	t->playlist.item_selected = 0;
 	t->playlist.item_duration = 0;
@@ -199,6 +206,20 @@ tui_show_dialog(Tui *t, const char message[], TuiDialogType type)
 		_draw_begin(t);
 		_set_footer(t);
 	}
+
+	_draw_end(t);
+}
+
+
+void
+tui_show_cursor(Tui *t, int enable)
+{
+	_draw_begin(t);
+
+	if (enable)
+		str_append_n(&t->buffer, "\x1b[?25h", 6);
+	else
+		str_append_n(&t->buffer, "\x1b[?25l", 6);
 
 	_draw_end(t);
 }
@@ -367,32 +388,75 @@ tui_playlist_find_query(Tui *t, const char query[], int len)
 
 
 void
+tui_playlist_find_query_clear(Tui *t)
+{
+	t->playlist.found = -1;
+	str_set_n(&t->input_buffer, NULL, 0);
+
+	_draw_begin(t);
+	_set_footer(t);
+	_draw_end(t);
+}
+
+
+void
 tui_playlist_find_next(Tui *t)
 {
 	TuiPlaylist *const p = &t->playlist;
 	const char *const query = t->input_buffer.cstr;
 
 	int start = p->found;
-	if (start < 0)
-		start = 0;
-	else if (start >= 0)
-		start++;
+	if (start == _FOUND_NOT_FOUND || start == _FOUND_END)
+		return;
 
-	int idx = -1;
+	start++;
+	int idx = _FOUND_NOT_FOUND;
 	for (int i = start; i < p->items_len; i++) {
-		idx = _playlist_cmp(p->items[i], i, query);
-		if (idx >= 0)
+		if (_playlist_cmp(p->items[i], i, query)) {
+			idx = i;
 			break;
+		}
 	}
 
-	// TODO: print 'not found'
-	p->found = idx;
+	if (idx < 0)
+		p->found = (p->found >= 0)? _FOUND_END : idx;
+	else
+		p->found = idx;
+
+	_draw_begin(t);
+	_playlist_cursor_at(t, idx);
+	_set_footer(t);
+	_draw_end(t);
 }
 
 
 void
 tui_playlist_find_prev(Tui *t)
 {
+	TuiPlaylist *const p = &t->playlist;
+	const char *const query = t->input_buffer.cstr;
+
+	int start = p->found;
+	if (start == _FOUND_NOT_FOUND)
+		return;
+	if (start == _FOUND_END)
+		start = t->playlist.item_selected;
+
+	start--;
+	int idx = _FOUND_NOT_FOUND; 
+	for (int i = start; i >= 0; i--) {
+		if (_playlist_cmp(p->items[i], i, query)) {
+			idx = i;
+			break;
+		}
+	}
+
+	p->found = idx;
+
+	_draw_begin(t);
+	_playlist_cursor_at(t, idx);
+	_set_footer(t);
+	_draw_end(t);
 }
 
 
@@ -752,9 +816,19 @@ _set_footer(Tui *t)
 	}
 
 	if (t->state == _STATE_FINDING) {
+		const char *label = "Find";
+		switch (t->playlist.found) {
+		case -2:
+			label = "Find [Not Found]";
+			break;
+		case -3:
+			label = "Find [End]";
+			break;
+		}
+
 		str_append_fmt(str, "\x1b[%d;1H", t->footer_pos);
 		str_append_fmt(str, "\x1b[1;" CFG_FOOTER_COLOR_FG ";" CFG_FOOTER_COLOR_BG
-			       "m\x1b[K%s: %s", "Find", t->input_buffer.cstr);
+			       "m\x1b[K%s: %s", label, t->input_buffer.cstr);
 		return;
 	}
 
@@ -805,15 +879,40 @@ _playlist_cursor(Tui *t, int step, int is_scroll)
 }
 
 
+static void
+_playlist_cursor_at(Tui *t, int idx)
+{
+	if (idx < 0)
+		return;
+
+	log_info("idx: %d: %s", idx, t->playlist.items[idx]->file_path);
+
+	const int end = _get_playlist_relative_len(t) - 1;
+	// scroll down
+	if (idx > (t->playlist.top + end))
+		t->playlist.top += (idx - (t->playlist.top + end));
+
+	// scroll up
+	else if (idx < t->playlist.top)
+		t->playlist.top = idx;
+
+	t->playlist.curr = (idx - t->playlist.top);
+	t->playlist.item_selected = idx;
+
+	_set_header(t);
+	_set_body(t);
+}
+
+
 static int
 _playlist_cmp(const PlaylistItem *pl, int idx, const char query[])
 {
 	if (cstr_case_str(pl->title, query) != NULL)
-		return idx;
+		return 1;
 	if (cstr_case_str(pl->artist, query) != NULL)
-		return idx;
+		return 1;
 	if (cstr_case_str(pl->file_path, query) != NULL)
-		return idx;
-	
-	return -1;
+		return 1;
+
+	return 0;
 }

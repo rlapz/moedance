@@ -319,6 +319,7 @@ _event_kbd_handler(Moedance *m, int fd)
 		case KBD_ENTER:
 			SET(m->flags, _FLAG_FINDING_FIND);
 			UNSET(m->flags, _FLAG_FINDING_QUERY);
+			tui_show_cursor(&m->tui, 0);
 			tui_playlist_find_next(&m->tui);
 			return;
 		}
@@ -343,12 +344,14 @@ _event_kbd_handler(Moedance *m, int fd)
 		case KBD_P:
 			tui_playlist_find_prev(&m->tui);
 			break;
-		case KBD_ENTER:
-			_player_play(m);
-			break;
+		//case KBD_ENTER:
+		//	_player_play(m);
+		//	break;
 		case KBD_SLASH:
 			SET(m->flags, _FLAG_FINDING_QUERY);
 			UNSET(m->flags, _FLAG_FINDING_FIND);
+			tui_playlist_find_query_clear(&m->tui);
+			tui_show_cursor(&m->tui, 1);
 			break;
 		}
 
@@ -458,6 +461,7 @@ _tui_playlist_find_begin(Moedance *m)
 
 	SET(m->flags, _FLAG_FINDING_QUERY);
 	tui_playlist_find_begin(&m->tui);
+	tui_show_cursor(&m->tui, 1);
 }
 
 
@@ -467,6 +471,7 @@ _tui_playlist_find_end(Moedance *m)
 	UNSET(m->flags, _FLAG_FINDING_QUERY);
 	UNSET(m->flags, _FLAG_FINDING_FIND);
 	tui_playlist_find_end(&m->tui);
+	tui_show_cursor(&m->tui, 0);
 }
 
 

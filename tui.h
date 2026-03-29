@@ -53,6 +53,7 @@ void tui_deinit(Tui *t);
 void tui_draw(Tui *t);
 
 void tui_show_dialog(Tui *t, const char message[], TuiDialogType type);
+void tui_show_cursor(Tui *t, int enable);
 
 void tui_set_playlist(Tui *t, const PlaylistItem *items[], int len);
 void tui_set_duration(Tui *t, int64_t duration);
@@ -66,6 +67,7 @@ void tui_playlist_bottom(Tui *t);
 
 void tui_playlist_find_begin(Tui *t);
 void tui_playlist_find_query(Tui *t, const char query[], int len);
+void tui_playlist_find_query_clear(Tui *t);
 void tui_playlist_find_next(Tui *t);
 void tui_playlist_find_prev(Tui *t);
 void tui_playlist_find_end(Tui *t);
