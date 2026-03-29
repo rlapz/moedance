@@ -22,13 +22,6 @@ enum {
 
 
 enum {
-	_FOUND_BEGIN,
-	_FOUND_NOT_FOUND,
-	_FOUND_END,
-};
-
-
-enum {
 	_PLAYER_STATE_STOPPED,
 	_PLAYER_STATE_PLAYING,
 	_PLAYER_STATE_PAUSED,
@@ -64,7 +57,7 @@ static int  _get_playlist_relative_len(const Tui *t);
 static void _playlist_cursor(Tui *t, int step, int is_scroll);
 static void _playlist_cursor_at(Tui *t, int idx);
 
-static int  _playlist_cmp(const PlaylistItem *pl, int idx, const char query[]);
+static int  _playlist_cmp(const PlaylistItem *pl, const char query[]);
 
 
 /*
@@ -353,6 +346,19 @@ tui_playlist_bottom(Tui *t)
 
 
 void
+tui_playlist_curr(Tui *t)
+{
+	const int idx = t->playlist.item_active;
+	if (idx < 0)
+		return;
+
+	_draw_begin(t);
+	_playlist_cursor_at(t, idx);
+	_draw_end(t);
+}
+
+
+void
 tui_playlist_find_begin(Tui *t)
 {
 	if (t->state != _STATE_NORMAL)
@@ -405,21 +411,21 @@ tui_playlist_find_next(Tui *t)
 	TuiPlaylist *const p = &t->playlist;
 	const char *const query = t->input_buffer.cstr;
 
-	int start = p->found;
-	if (start == _FOUND_NOT_FOUND || start == _FOUND_END)
+	int next = t->playlist.found;
+	if (next >= t->playlist.items_len)
 		return;
 
-	start++;
-	int idx = _FOUND_NOT_FOUND;
-	for (int i = start; i < p->items_len; i++) {
-		if (_playlist_cmp(p->items[i], i, query)) {
+	next++;
+	int idx = -1;
+	for (int i = next; i < p->items_len; i++) {
+		if (_playlist_cmp(p->items[i], query)) {
 			idx = i;
 			break;
 		}
 	}
 
 	if (idx < 0)
-		p->found = (p->found >= 0)? _FOUND_END : idx;
+		p->found = next - 1;
 	else
 		p->found = idx;
 
@@ -436,22 +442,23 @@ tui_playlist_find_prev(Tui *t)
 	TuiPlaylist *const p = &t->playlist;
 	const char *const query = t->input_buffer.cstr;
 
-	int start = p->found;
-	if (start == _FOUND_NOT_FOUND)
+	int prev = t->playlist.found;
+	if (prev <= 0)
 		return;
-	if (start == _FOUND_END)
-		start = t->playlist.item_selected;
 
-	start--;
-	int idx = _FOUND_NOT_FOUND; 
-	for (int i = start; i >= 0; i--) {
-		if (_playlist_cmp(p->items[i], i, query)) {
+	prev--;
+	int idx = -1;
+	for (int i = prev; i >= 0; i--) {
+		if (_playlist_cmp(p->items[i], query)) {
 			idx = i;
 			break;
 		}
 	}
 
-	p->found = idx;
+	if (idx < 0)
+		p->found = prev + 1;
+	else
+		p->found = idx;
 
 	_draw_begin(t);
 	_playlist_cursor_at(t, idx);
@@ -816,19 +823,9 @@ _set_footer(Tui *t)
 	}
 
 	if (t->state == _STATE_FINDING) {
-		const char *label = "Find";
-		switch (t->playlist.found) {
-		case -2:
-			label = "Find [Not Found]";
-			break;
-		case -3:
-			label = "Find [End]";
-			break;
-		}
-
 		str_append_fmt(str, "\x1b[%d;1H", t->footer_pos);
 		str_append_fmt(str, "\x1b[1;" CFG_FOOTER_COLOR_FG ";" CFG_FOOTER_COLOR_BG
-			       "m\x1b[K%s: %s", label, t->input_buffer.cstr);
+			       "m\x1b[K%s: %s", "Find", t->input_buffer.cstr);
 		return;
 	}
 
@@ -905,7 +902,7 @@ _playlist_cursor_at(Tui *t, int idx)
 
 
 static int
-_playlist_cmp(const PlaylistItem *pl, int idx, const char query[])
+_playlist_cmp(const PlaylistItem *pl, const char query[])
 {
 	if (cstr_case_str(pl->title, query) != NULL)
 		return 1;

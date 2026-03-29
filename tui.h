@@ -64,6 +64,7 @@ void tui_playlist_page_up(Tui *t);
 void tui_playlist_page_down(Tui *t);
 void tui_playlist_top(Tui *t);
 void tui_playlist_bottom(Tui *t);
+void tui_playlist_curr(Tui *t);
 
 void tui_playlist_find_begin(Tui *t);
 void tui_playlist_find_query(Tui *t, const char query[], int len);

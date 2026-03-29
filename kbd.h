@@ -16,6 +16,7 @@ enum {
 	KBD_BACKSPACE,
 	KBD_SPACE,
 	KBD_SLASH,
+	KBD_C,
 	KBD_N,
 	KBD_P,
 	KBD_Q,
