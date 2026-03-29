@@ -23,6 +23,7 @@ typedef struct tui_playlist {
 	int                  top;
 	int                  curr;
 	int                  found;
+	int                  find_state;
 	int                  item_active;
 	int                  item_selected;
 	int64_t              item_duration;	/* min duration */

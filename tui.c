@@ -22,6 +22,13 @@ enum {
 
 
 enum {
+	_FIND_STATE_FOUND,
+	_FIND_STATE_NOT_FOUND,
+	_FIND_STATE_END,
+};
+
+
+enum {
 	_PLAYER_STATE_STOPPED,
 	_PLAYER_STATE_PLAYING,
 	_PLAYER_STATE_PAUSED,
@@ -366,6 +373,7 @@ tui_playlist_find_begin(Tui *t)
 
 	t->state = _STATE_FINDING;
 	t->playlist.found = -1;
+	t->playlist.find_state = _FIND_STATE_FOUND;
 	str_set_n(&t->input_buffer, NULL, 0);
 
 	_draw_begin(t);
@@ -397,6 +405,7 @@ void
 tui_playlist_find_query_clear(Tui *t)
 {
 	t->playlist.found = -1;
+	t->playlist.find_state = _FIND_STATE_FOUND;
 	str_set_n(&t->input_buffer, NULL, 0);
 
 	_draw_begin(t);
@@ -424,10 +433,16 @@ tui_playlist_find_next(Tui *t)
 		}
 	}
 
-	if (idx < 0)
+	if (idx < 0) {
+		if (p->found < 0)
+			p->find_state = _FIND_STATE_NOT_FOUND;
+		else
+			p->find_state = _FIND_STATE_END;
+
 		p->found = next - 1;
-	else
+	} else {
 		p->found = idx;
+	}
 
 	_draw_begin(t);
 	_playlist_cursor_at(t, idx);
@@ -455,10 +470,12 @@ tui_playlist_find_prev(Tui *t)
 		}
 	}
 
-	if (idx < 0)
+	if (idx < 0) {
 		p->found = prev + 1;
-	else
+	} else {
+		p->find_state = _FIND_STATE_FOUND;
 		p->found = idx;
+	}
 
 	_draw_begin(t);
 	_playlist_cursor_at(t, idx);
@@ -472,6 +489,7 @@ tui_playlist_find_end(Tui *t)
 {
 	t->state = _STATE_NORMAL;
 	t->playlist.found = -1;
+	t->playlist.find_state = _FIND_STATE_FOUND;
 	str_set_n(&t->input_buffer, NULL, 0);
 
 	_draw_begin(t);
@@ -823,9 +841,19 @@ _set_footer(Tui *t)
 	}
 
 	if (t->state == _STATE_FINDING) {
+		const char *lbl = "Find";
+		switch (t->playlist.find_state) {
+		case _FIND_STATE_NOT_FOUND:
+			lbl = "Find [Not Found]";
+			break;
+		case _FIND_STATE_END:
+			lbl = "Find [End]";
+			break;
+		}
+
 		str_append_fmt(str, "\x1b[%d;1H", t->footer_pos);
 		str_append_fmt(str, "\x1b[1;" CFG_FOOTER_COLOR_FG ";" CFG_FOOTER_COLOR_BG
-			       "m\x1b[K%s: %s", "Find", t->input_buffer.cstr);
+			       "m\x1b[K%s: %s", lbl, t->input_buffer.cstr);
 		return;
 	}
 
