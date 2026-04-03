@@ -149,6 +149,18 @@ cstr_trim_right_len(const char cstr[], size_t len)
 }
 
 
+int
+cstr_to_int64(const char cstr[], int64_t *out)
+{
+	errno = 0;
+	const long long ret = strtoll(cstr, NULL, 10);
+	if (errno == 0)
+		*out = (int64_t)ret;
+
+	return -errno;
+}
+
+
 /*
  * Str
  */

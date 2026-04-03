@@ -48,6 +48,7 @@ int     player_item_play(Player *p, const char file[]);
 void    player_item_stop(Player *p);
 void    player_item_toggle(Player *p);
 int64_t player_item_get_time(Player *p);
+int     player_item_is_playing(Player *p);
 int     player_item_is_stopped(Player *p);
 
 

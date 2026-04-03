@@ -3,6 +3,7 @@
 
 
 #include "config.h"
+#include "util.h"
 
 
 enum {
@@ -14,12 +15,12 @@ enum {
 
 
 typedef struct cmd {
-        int         type;
-        int         args_len;
-        const char *args[CFG_CMD_ARGS_SIZE];
+        int            type;
+        int            args_len;
+        SpaceTokenizer args[CFG_CMD_ARGS_SIZE];
 } Cmd;
 
-void cmd_parse_query(Cmd *c, char buffer[], int buffer_size, const char query[]);
+void cmd_parse_query(Cmd *c, const char query[]);
 
 
 #endif

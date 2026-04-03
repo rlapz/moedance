@@ -93,6 +93,7 @@ moedance_init(Moedance *m, const char root_dir[])
 
 	m->flags = 0;
 	m->root_dir = root_dir;
+	m->sleep_s = 0;
 	_moe = m;
 	return 0;
 }
@@ -444,6 +445,14 @@ _event_timerfd_handler(Moedance *m, int fd)
 
 	if (ISSET(m->flags, _FLAG_KEY_QUIT))
 		_tui_quit_dialog(m);
+
+	if (m->sleep_s > 0) {
+		m->sleep_s--;
+		if (m->sleep_s > 0)
+			return;
+
+		_player_toggle(m);
+	}
 }
 
 
@@ -525,14 +534,19 @@ static void
 _handle_command(Moedance *m)
 {
 	Cmd cmd;
-	char buffer[CFG_INPUT_BUFFER_SIZE];
-	cmd_parse_query(&cmd, buffer, LEN(buffer), tui_command_query_get(&m->tui));
+	cmd_parse_query(&cmd, tui_command_query_get(&m->tui));
 
-	int ret = 1;
+	int ret = -1;
 	switch (cmd.type) {
 	case CMD_TYPE_EMPTY:
 		break;
 	case CMD_TYPE_SLEEP:
+		if (player_item_is_playing(&m->player) == 0) {
+			tui_show_dialog(&m->tui, "Please play something.", TUI_DIALOG_TYPE_INFO);
+			_tui_command_end(m, 0);
+			return;
+		}
+
 		ret = _handle_command_sleep(m, &cmd);
 		break;
 	case CMD_TYPE_QUIT:
@@ -542,11 +556,14 @@ _handle_command(Moedance *m)
 
 	int set_footer = 0;
 	switch (ret) {
-	case 1:
+	case -1:
 		tui_show_dialog(&m->tui, "Unknown command!", TUI_DIALOG_TYPE_ERROR);
 		break;
-	case 2:
+	case -2:
 		tui_show_dialog(&m->tui, "Invalid argument!", TUI_DIALOG_TYPE_ERROR);
+		break;
+	case -3:
+		_tui_error_dialog(m);
 		break;
 	default:
 		set_footer = 1;
@@ -561,9 +578,45 @@ static int
 _handle_command_sleep(Moedance *m, Cmd *cmd)
 {
 	if (cmd->args_len == 0)
-		return 2;
+		return -2;
 
-	log_info("sleeping...");
+	char buffer[32];
+	SpaceTokenizer *const st = &cmd->args[0];
+	if (st->len >= LEN(buffer))
+		return -2;
+
+	cstr_copy_n(buffer, LEN(buffer), st->value, st->len);
+
+	int mul;
+	const char suffix = buffer[st->len - 1];
+	switch (suffix) {
+	case 's':
+		mul = 1;
+		break;
+	case 'm':
+		mul = 60;
+		break;
+	case 'h':
+		mul = 3600;
+		break;
+	default:
+		return -2;
+	}
+
+	int64_t val = 0;
+	buffer[st->len - 1] = '\0';
+	if (cstr_to_int64(buffer, &val) < 0) {
+		log_err(errno, "moedance: _handle_command_sleep: cstr_to_int64: invalid value");
+		return -3;
+	}
+
+	int64_t sleep_value;
+	if (__builtin_mul_overflow(val, mul, &sleep_value)) {
+		log_err(ERANGE, "moedance: _handle_command_sleep: __builtin_mul_overflow: value too big");
+		return -3;
+	}
+
+	m->sleep_s = sleep_value;
 	return 0;
 }
 

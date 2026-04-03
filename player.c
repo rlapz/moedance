@@ -156,6 +156,14 @@ player_item_get_time(Player *p)
 
 
 int
+player_item_is_playing(Player *p)
+{
+	return ((atomic_load(&p->is_paused) == 0) &&
+		(atomic_load(&p->context.is_stopped) == 0));
+}
+
+
+int
 player_item_is_stopped(Player *p)
 {
 	return atomic_load(&p->context.is_stopped);

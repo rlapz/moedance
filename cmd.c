@@ -5,12 +5,12 @@
 #include "util.h"
 
 
-static void _handle_sleep(Cmd *c, SpaceTokenizer *st, const char *arg);
+static void _handle_sleep(Cmd *c, const char *arg);
 static void _handle_quit(Cmd *c);
 
 
 void
-cmd_parse_query(Cmd *c, char buffer[], int buffer_size, const char query[])
+cmd_parse_query(Cmd *c, const char query[])
 {
         SpaceTokenizer st;
         const char *const next = space_tokenizer_next(&st, query);
@@ -21,7 +21,7 @@ cmd_parse_query(Cmd *c, char buffer[], int buffer_size, const char query[])
         }
 
         if (strncmp(st.value, "sleep", 5) == 0) {
-                _handle_sleep(c, &st, st.value);
+                _handle_sleep(c, next);
                 return;
         }
 
@@ -39,14 +39,14 @@ cmd_parse_query(Cmd *c, char buffer[], int buffer_size, const char query[])
  * Private
  */
 static void
-_handle_sleep(Cmd *c, SpaceTokenizer *st, const char *arg)
+_handle_sleep(Cmd *c, const char *arg)
 {
-        log_info("%s", st->value);
-
         c->type = CMD_TYPE_SLEEP;
-        //log_info("|%s|", arg);
+        if (space_tokenizer_next(&c->args[0], arg) == NULL) {
+                c->args_len = 0;
+                return;
+        }
 
-        //c->type = CMD_TYPE_SLEEP;
         c->args_len = 1;
 }
 
