@@ -60,7 +60,8 @@
 #define CFG_PROBE_SCORE_MIN    (1)
 
 
-#define CFG_FINDING_QUERY_SIZE (64)
+#define CFG_INPUT_BUFFER_SIZE  (64)
+#define CFG_CMD_ARGS_SIZE      (8)
 
 
 /*
