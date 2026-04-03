@@ -99,6 +99,7 @@ tui_init(Tui *t, const char root_dir[])
 
 	t->state = _STATE_NORMAL;
 	t->root_dir = root_dir;
+	t->sleep_duration = 0;
 	t->playlist.state = _PLAYER_STATE_STOPPED;
 	t->playlist.top = 0;
 	t->playlist.curr = 0;
@@ -252,6 +253,17 @@ tui_set_duration(Tui *t, int64_t duration)
 
 	_draw_begin(t);
 	_set_footer(t);
+	_draw_end(t);
+}
+
+
+void
+tui_set_sleep_duration(Tui *t, int64_t duration)
+{
+	t->sleep_duration = duration;
+
+	_draw_begin(t);
+	_set_header(t);
 	_draw_end(t);
 }
 
@@ -813,8 +825,6 @@ _set_header(Tui *t)
 		curr = t->playlist.curr + t->playlist.top + 1;
 
 	Str *const str = &t->buffer;
-	const int clen = snprintf(NULL, 0, CFG_HEADER_LABEL " [%u/%u]", curr, len);
-	const int cpos = t->width - clen;
 	int dpos = t->width - (14 - 3);
 	if (dpos < 0)
 		dpos = 201;
@@ -822,7 +832,20 @@ _set_header(Tui *t)
 	// row 0
 	str_append_fmt(str, "\x1b[%d;1H\x1b[1;" CFG_HEADER_COLOR_FG ";" CFG_HEADER_COLOR_BG "m\x1b[K%s",
 		       t->header_pos, t->root_dir);
-	str_append_fmt(str, "\x1b[%d;%dH " CFG_HEADER_LABEL " [%u/%u]\x1b[m", t->header_pos, cpos, curr, len);
+	if (t->sleep_duration > 0) {
+		char dur[64];
+		const char *const _dur = cstr_time_fmt(dur, sizeof(dur), t->sleep_duration);
+
+		const int clen = snprintf(NULL, 0, "[%s] " CFG_HEADER_LABEL " [%u/%u]", _dur, curr, len);
+		const int cpos = t->width - clen;
+
+		str_append_fmt(str, "\x1b[%d;%dH [%s] " CFG_HEADER_LABEL " [%u/%u]\x1b[m", t->header_pos, cpos,
+			       _dur, curr, len);
+	} else {
+		const int clen = snprintf(NULL, 0, CFG_HEADER_LABEL " [%u/%u]", curr, len);
+		const int cpos = t->width - clen;
+		str_append_fmt(str, "\x1b[%d;%dH " CFG_HEADER_LABEL " [%u/%u]\x1b[m", t->header_pos, cpos, curr, len);
+	}
 
 	// row 1
 	const int pos = t->header_pos + 1;

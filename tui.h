@@ -46,6 +46,7 @@ typedef struct tui {
 	Str          input_buffer;
 	int          tty_fd;
 	TermIOS      termios_orig;
+	int64_t      sleep_duration;
 } Tui;
 
 
@@ -58,6 +59,7 @@ void tui_show_cursor(Tui *t, int enable);
 
 void tui_set_playlist(Tui *t, const PlaylistItem *items[], int len);
 void tui_set_duration(Tui *t, int64_t duration);
+void tui_set_sleep_duration(Tui *t, int64_t duration);
 
 void tui_playlist_cursor_up(Tui *t);
 void tui_playlist_cursor_down(Tui *t);

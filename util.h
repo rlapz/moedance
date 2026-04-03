@@ -28,7 +28,8 @@ int   cstr_is_empty(const char cstr[]);
 char   *cstr_trim_left(char cstr[]);
 size_t  cstr_trim_right_len(const char cstr[], size_t len);
 
-int cstr_to_int64(const char cstr[], int64_t *out);
+int   cstr_to_int64(const char cstr[], int64_t *out);
+char *cstr_num(char cstr[]);
 
 
 /*

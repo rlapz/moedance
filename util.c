@@ -161,6 +161,22 @@ cstr_to_int64(const char cstr[], int64_t *out)
 }
 
 
+char *
+cstr_num(char cstr[])
+{
+	char *p = cstr;
+	while (*p != '\0') {
+		if (isdigit(*p) == 0)
+			break;
+
+		p++;
+	}
+
+	*p = '\0';
+	return p;
+}
+
+
 /*
  * Str
  */

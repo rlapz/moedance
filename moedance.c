@@ -448,6 +448,8 @@ _event_timerfd_handler(Moedance *m, int fd)
 
 	if (m->sleep_s > 0) {
 		m->sleep_s--;
+
+		tui_set_sleep_duration(&m->tui, m->sleep_s);
 		if (m->sleep_s > 0)
 			return;
 
@@ -586,6 +588,11 @@ _handle_command_sleep(Moedance *m, Cmd *cmd)
 		return -2;
 
 	cstr_copy_n(buffer, LEN(buffer), st->value, st->len);
+	if (strcmp(buffer, "cancel") == 0) {
+		m->sleep_s = 0;
+		tui_set_sleep_duration(&m->tui, m->sleep_s);
+		return 0;
+	}
 
 	int mul;
 	const char suffix = buffer[st->len - 1];
@@ -609,6 +616,9 @@ _handle_command_sleep(Moedance *m, Cmd *cmd)
 		log_err(errno, "moedance: _handle_command_sleep: cstr_to_int64: invalid value");
 		return -3;
 	}
+
+	if (val <= 0)
+		return -2;
 
 	int64_t sleep_value;
 	if (__builtin_mul_overflow(val, mul, &sleep_value)) {
