@@ -18,6 +18,7 @@
 enum {
 	_STATE_NORMAL,
 	_STATE_FINDING,
+	_STATE_COMMAND,
 };
 
 
@@ -64,6 +65,7 @@ static int  _get_playlist_relative_len(const Tui *t);
 static void _playlist_cursor(Tui *t, int step, int is_scroll);
 static void _playlist_cursor_at(Tui *t, int idx);
 
+static void _fill_input_buffer(Tui *t, const char cstr[], int len);
 static int  _playlist_cmp(const PlaylistItem *pl, const char query[]);
 
 
@@ -79,7 +81,7 @@ tui_init(Tui *t, const char root_dir[])
 		return -1;
 	}
 
-	ret = str_init_alloc(&t->input_buffer, CFG_FINDING_QUERY_SIZE + 1);
+	ret = str_init_alloc(&t->input_buffer, CFG_INPUT_BUFFER_SIZE + 1);
 	if (ret < 0) {
 		log_err(ret, "tui: tui_init: str_init_alloc: input_buffer");
 		goto err0;
@@ -385,19 +387,7 @@ tui_playlist_find_begin(Tui *t)
 void
 tui_playlist_find_query(Tui *t, const char query[], int len)
 {
-	if (len < 0) {
-		// delete input buffer chars
-		str_shrink(&t->input_buffer, (size_t)(-len));
-	} else {
-		if (t->input_buffer.len >= CFG_FINDING_QUERY_SIZE)
-			return;
-
-		str_append_n(&t->input_buffer, query, (size_t)len);
-	}
-
-	_draw_begin(t);
-	_set_footer(t);
-	_draw_end(t);
+	_fill_input_buffer(t, query, len);
 }
 
 
@@ -617,6 +607,50 @@ tui_playlist_prev(Tui *t)
 	_set_footer(t);
 	_draw_end(t);
 	return ret;
+}
+
+
+void
+tui_command_begin(Tui *t)
+{
+	if (t->state != _STATE_NORMAL)
+		return;
+	
+	t->state = _STATE_COMMAND;
+	str_set_n(&t->input_buffer, NULL, 0);
+
+	_draw_begin(t);
+	_set_footer(t);
+	_draw_end(t);
+}
+
+
+void
+tui_command_query(Tui *t, const char query[], int len)
+{
+	_fill_input_buffer(t, query, len);
+}
+
+
+const char *
+tui_command_query_get(Tui *t)
+{
+	return t->input_buffer.cstr;
+}
+
+
+void
+tui_command_end(Tui *t, int set_footer)
+{
+	t->state = _STATE_NORMAL;
+	str_set_n(&t->input_buffer, NULL, 0);
+
+	if (set_footer == 0)
+		return;
+
+	_draw_begin(t);
+	_set_footer(t);
+	_draw_end(t);
 }
 
 
@@ -857,6 +891,13 @@ _set_footer(Tui *t)
 		return;
 	}
 
+	if (t->state == _STATE_COMMAND) {
+		str_append_fmt(str, "\x1b[%d;1H", t->footer_pos);
+		str_append_fmt(str, "\x1b[1;" CFG_FOOTER_COLOR_FG ";" CFG_FOOTER_COLOR_BG
+			       "m\x1b[K: %s", t->input_buffer.cstr);
+		return;
+	}
+
 	char dur0[64];
 	char dur1[64];
 	const PlaylistItem *const item = t->playlist.items[t->playlist.item_active];
@@ -924,6 +965,25 @@ _playlist_cursor_at(Tui *t, int idx)
 
 	_set_header(t);
 	_set_body(t);
+}
+
+
+static void
+_fill_input_buffer(Tui *t, const char cstr[], int len)
+{
+	if (len < 0) {
+		// delete input buffer chars
+		str_shrink(&t->input_buffer, (size_t)(-len));
+	} else {
+		if (t->input_buffer.len >= CFG_INPUT_BUFFER_SIZE)
+			return;
+
+		str_append_n(&t->input_buffer, cstr, (size_t)len);
+	}
+
+	_draw_begin(t);
+	_set_footer(t);
+	_draw_end(t);
 }
 
 

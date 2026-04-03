@@ -77,6 +77,7 @@ _handle_normal(char key)
 	case 13: return KBD_ENTER;
 	case ' ': return KBD_SPACE;
 	case '/': return KBD_SLASH;
+	case ':': return KBD_COLON;
 	case 127: return KBD_BACKSPACE;
 	case 'c': return KBD_C;
 	case 'n': return KBD_N;

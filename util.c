@@ -106,6 +106,61 @@ cstr_case_str(const char h[], const char n[])
 }
 
 
+int
+cstr_is_empty(const char cstr[])
+{
+	if (cstr == NULL)
+		return 1;
+	
+	return (cstr[0] == '\0');
+}
+
+
+char *
+cstr_trim_left(char cstr[])
+{
+	char *p = cstr;
+	while (*p != '\0') {
+		if (isspace(*p) == 0)
+			break;
+		
+		p++;
+	}
+
+	return p;
+}
+
+
+size_t
+cstr_trim_right_len(const char cstr[], size_t len)
+{
+	if (len == 0)
+		return 0;
+	
+	const char *p = cstr + (len - 1);
+	while ((p > cstr) && (*p != '\0')) {
+		if (isspace(*p) == 0)
+			break;
+
+		p--;
+	}
+
+	return (p - cstr);
+}
+
+
+int
+cstr_to_int64(const char cstr[], int64_t *out)
+{
+	errno = 0;
+	const long long ret = strtoll(cstr, NULL, 10);
+	if (errno == 0)
+		*out = (int64_t)ret;
+
+	return -errno;
+}
+
+
 /*
  * Str
  */
@@ -393,6 +448,27 @@ stream_in_flush(int fd)
 	while (read(fd, &c, 1) > 0);
 	errno = 0;
 }
+
+
+/*
+ * SpaceTokenizer
+ */
+const char *
+space_tokenizer_next(SpaceTokenizer *s, const char raw[])
+{
+        const char *const value = cstr_trim_left((char *)raw);
+        if (*value == '\0')
+                return NULL;
+
+        unsigned len = 0;
+        while ((value[len] != '\0') && (isspace(value[len]) == 0))
+                len++;
+
+        s->len = len;
+        s->value = value;
+        return cstr_trim_left((char *)&value[len]);
+}
+
 
 
 /*

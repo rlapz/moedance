@@ -80,6 +80,11 @@ const PlaylistItem *tui_playlist_toggle(Tui *t);
 const PlaylistItem *tui_playlist_next(Tui *t);
 const PlaylistItem *tui_playlist_prev(Tui *t);
 
+void        tui_command_begin(Tui *t);
+void        tui_command_query(Tui *t, const char query[], int len);
+const char *tui_command_query_get(Tui *t);
+void        tui_command_end(Tui *t, int set_footer);
+
 
 #endif
 

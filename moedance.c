@@ -17,6 +17,7 @@
 
 #include "moedance.h"
 #include "kbd.h"
+#include "cmd.h"
 #include "config.h"
 
 
@@ -29,6 +30,7 @@ enum {
 	_FLAG_KEY_QUIT      = (1 << 2),
 	_FLAG_FINDING_QUERY = (1 << 3),
 	_FLAG_FINDING_FIND  = (1 << 4),
+	_FLAG_COMMAND       = (1 << 5),
 };
 
 enum {
@@ -55,6 +57,10 @@ static void _tui_loading_dialog(Moedance *m);
 static void _tui_error_dialog(Moedance *m);
 static void _tui_playlist_find_begin(Moedance *m);
 static void _tui_playlist_find_end(Moedance *m);
+static void _tui_command_begin(Moedance *m);
+static void _tui_command_end(Moedance *m, int set_footer);
+static void _handle_command(Moedance *m);
+static int  _handle_command_sleep(Moedance *m, Cmd *cmd);
 
 static void _player_play(Moedance *m);
 static void _player_stop(Moedance *m);
@@ -87,6 +93,7 @@ moedance_init(Moedance *m, const char root_dir[])
 
 	m->flags = 0;
 	m->root_dir = root_dir;
+	m->sleep_s = 0;
 	_moe = m;
 	return 0;
 }
@@ -358,6 +365,26 @@ _event_kbd_handler(Moedance *m, int fd)
 		return;
 	}
 
+	if (ISSET(m->flags, _FLAG_COMMAND)) {
+		switch (kbd) {
+		case KBD_BACKSPACE:
+			tui_command_query(&m->tui, buffer, -1);
+			break;
+		case KBD_ESCAPE:
+			_tui_command_end(m, 1);
+			break;
+		case KBD_ENTER:
+			_handle_command(m);
+			return;
+		}
+
+		if (is_ascii(buffer[0]) == 0)
+			return;
+
+		tui_command_query(&m->tui, buffer, (int)rd);
+		return;
+	}
+
 	if (ISSET(m->flags, _FLAG_KEY_QUIT)) {
 		if (kbd == KBD_Y) {
 			UNSET(m->flags, _FLAG_ALIVE);
@@ -379,6 +406,7 @@ _event_kbd_handler(Moedance *m, int fd)
 	case KBD_SLASH: _tui_playlist_find_begin(m); break;
 	case KBD_SPACE: _player_toggle(m); break;
 	case KBD_ENTER: _player_play(m); break;
+	case KBD_COLON: _tui_command_begin(m);  break;
 	case KBD_C: tui_playlist_curr(&m->tui); break;
 	case KBD_N: _player_next(m); break;
 	case KBD_P: _player_prev(m); break;
@@ -417,6 +445,14 @@ _event_timerfd_handler(Moedance *m, int fd)
 
 	if (ISSET(m->flags, _FLAG_KEY_QUIT))
 		_tui_quit_dialog(m);
+
+	if (m->sleep_s > 0) {
+		m->sleep_s--;
+		if (m->sleep_s > 0)
+			return;
+
+		_player_toggle(m);
+	}
 }
 
 
@@ -473,6 +509,115 @@ _tui_playlist_find_end(Moedance *m)
 	UNSET(m->flags, _FLAG_FINDING_FIND);
 	tui_playlist_find_end(&m->tui);
 	tui_show_cursor(&m->tui, 0);
+}
+
+
+static void
+_tui_command_begin(Moedance *m)
+{
+	SET(m->flags, _FLAG_COMMAND);
+	tui_command_begin(&m->tui);
+	tui_show_cursor(&m->tui, 1);
+}
+
+
+static void
+_tui_command_end(Moedance *m, int set_footer)
+{
+	UNSET(m->flags, _FLAG_COMMAND);
+	tui_command_end(&m->tui, set_footer);
+	tui_show_cursor(&m->tui, 0);
+}
+
+
+static void
+_handle_command(Moedance *m)
+{
+	Cmd cmd;
+	cmd_parse_query(&cmd, tui_command_query_get(&m->tui));
+
+	int ret = -1;
+	switch (cmd.type) {
+	case CMD_TYPE_EMPTY:
+		break;
+	case CMD_TYPE_SLEEP:
+		if (player_item_is_playing(&m->player) == 0) {
+			tui_show_dialog(&m->tui, "Please play something.", TUI_DIALOG_TYPE_INFO);
+			_tui_command_end(m, 0);
+			return;
+		}
+
+		ret = _handle_command_sleep(m, &cmd);
+		break;
+	case CMD_TYPE_QUIT:
+		UNSET(m->flags, _FLAG_ALIVE);
+		break;
+	}
+
+	int set_footer = 0;
+	switch (ret) {
+	case -1:
+		tui_show_dialog(&m->tui, "Unknown command!", TUI_DIALOG_TYPE_ERROR);
+		break;
+	case -2:
+		tui_show_dialog(&m->tui, "Invalid argument!", TUI_DIALOG_TYPE_ERROR);
+		break;
+	case -3:
+		_tui_error_dialog(m);
+		break;
+	default:
+		set_footer = 1;
+		break;
+	}
+
+	_tui_command_end(m, set_footer);
+}
+
+
+static int
+_handle_command_sleep(Moedance *m, Cmd *cmd)
+{
+	if (cmd->args_len == 0)
+		return -2;
+
+	char buffer[32];
+	SpaceTokenizer *const st = &cmd->args[0];
+	if (st->len >= LEN(buffer))
+		return -2;
+
+	cstr_copy_n(buffer, LEN(buffer), st->value, st->len);
+
+	int mul;
+	const char suffix = buffer[st->len - 1];
+	switch (suffix) {
+	case 's':
+		mul = 1;
+		break;
+	case 'm':
+		mul = 60;
+		break;
+	case 'h':
+		mul = 3600;
+		break;
+	default:
+		return -2;
+	}
+
+	int64_t val = 0;
+	buffer[st->len - 1] = '\0';
+	if (cstr_to_int64(buffer, &val) < 0) {
+		log_err(errno, "moedance: _handle_command_sleep: cstr_to_int64: invalid value");
+		return -3;
+	}
+
+	int64_t sleep_value;
+	if (__builtin_mul_overflow(val, mul, &sleep_value)) {
+		log_err(ERANGE, "moedance: _handle_command_sleep: __builtin_mul_overflow: value too big");
+		return -3;
+	}
+
+	m->sleep_s = sleep_value;
+	return 0;
 }
 
 

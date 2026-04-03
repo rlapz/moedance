@@ -17,6 +17,7 @@ typedef struct moedance {
 	Player        player;
 	Playlist      playlist;
 	const char   *root_dir;
+	int64_t       sleep_s;
 	mtx_t         mutex;
 } Moedance;
 
