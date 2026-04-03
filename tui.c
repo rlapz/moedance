@@ -51,6 +51,13 @@ static const char _dialog_type_chr[] = {
 };
 
 
+static const char *const _repeat_type_str[3] = {
+	[TUI_REPEAT_TYPE_ONE]  = "[r]",
+	[TUI_REPEAT_TYPE_ALL]  = "[R]",
+	[TUI_REPEAT_TYPE_NONE] = "",
+};
+
+
 static void _draw_begin(Tui *t);
 static void _draw_end(Tui *t);
 static void _clear(Tui *t);
@@ -101,6 +108,7 @@ tui_init(Tui *t, const char root_dir[])
 	t->root_dir = root_dir;
 	t->sleep_duration = 0;
 	t->playlist.state = _PLAYER_STATE_STOPPED;
+	t->playlist.repeat = TUI_REPEAT_TYPE_NONE;
 	t->playlist.top = 0;
 	t->playlist.curr = 0;
 	t->playlist.item_active = -1;
@@ -264,6 +272,17 @@ tui_set_sleep_duration(Tui *t, int64_t duration)
 
 	_draw_begin(t);
 	_set_header(t);
+	_draw_end(t);
+}
+
+
+void
+tui_set_repeat(Tui *t, TuiRepeatType type)
+{
+	t->playlist.repeat = type;
+
+	_draw_begin(t);
+	_set_footer(t);
 	_draw_end(t);
 }
 
@@ -514,6 +533,51 @@ tui_playlist_play(Tui *t)
 		t->playlist.item_duration = 0;
 		t->playlist.state = _PLAYER_STATE_PLAYING;
 		ret = t->playlist.items[sel_idx];
+	}
+
+	_draw_begin(t);
+	_set_body(t);
+	_set_footer(t);
+	_draw_end(t);
+	return ret;
+}
+
+
+const PlaylistItem *
+tui_playlist_play_top(Tui *t)
+{
+	const PlaylistItem *ret;
+	const int idx = t->playlist.item_active;
+	if ((idx < 0) || (t->playlist.items_len <= 0)) {
+		t->playlist.state = _PLAYER_STATE_STOPPED;
+		ret = NULL;
+	} else {
+		t->playlist.item_active = 0;
+		t->playlist.item_duration = 0;
+		t->playlist.state = _PLAYER_STATE_PLAYING;
+		ret = t->playlist.items[0];
+	}
+
+	_draw_begin(t);
+	_set_body(t);
+	_set_footer(t);
+	_draw_end(t);
+	return ret;
+}
+
+
+const PlaylistItem *
+tui_playlist_play_repeat(Tui *t)
+{
+	const PlaylistItem *ret;
+	const int idx = t->playlist.item_active;
+	if ((idx < 0) || (t->playlist.items_len <= 0)) {
+		t->playlist.state = _PLAYER_STATE_STOPPED;
+		ret = NULL;
+	} else {
+		t->playlist.item_duration = 0;
+		t->playlist.state = _PLAYER_STATE_PLAYING;
+		ret = t->playlist.items[idx];
 	}
 
 	_draw_begin(t);
@@ -934,8 +998,10 @@ _set_footer(Tui *t)
 		name = item->name;
 
 	str_append_fmt(str, "\x1b[%d;1H", t->footer_pos);
-	str_append_fmt(str, "\x1b[1;" CFG_FOOTER_COLOR_FG ";" CFG_FOOTER_COLOR_BG "m\x1b[K[%c] %d. %s",
-		       _player_state_chr[t->playlist.state], t->playlist.item_active + 1, name);
+	str_append_fmt(str, "\x1b[1;" CFG_FOOTER_COLOR_FG ";" CFG_FOOTER_COLOR_BG "m\x1b[K[%c]",
+		       _player_state_chr[t->playlist.state]);
+
+	str_append_fmt(str, "%s %d. %s", _repeat_type_str[t->playlist.repeat], t->playlist.item_active + 1, name);
 	str_append_fmt(str, "\x1b[%d;%dH [%s - %s]\x1b[m", t->footer_pos, dpos, d0, d1);
 }
 

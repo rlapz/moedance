@@ -10,6 +10,7 @@ enum {
         CMD_TYPE_EMPTY,
         CMD_TYPE_QUIT,
         CMD_TYPE_SLEEP,
+        CMD_TYPE_REPEAT,
         CMD_TYPE_UNKNOWN,
 };
 
