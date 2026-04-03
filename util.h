@@ -19,10 +19,13 @@
 /*
  * cstr
  */
-void  cstr_copy_n(char dest[], size_t dest_size, const char src[], size_t src_len);
-char *cstr_time_fmt(char dest[], size_t size, int64_t secs);
-int   cstr_cmp_vers(const char a[], const char b[]);
-char *cstr_case_str(const char h[], const char n[]);
+void    cstr_copy_n(char dest[], size_t dest_size, const char src[], size_t src_len);
+char   *cstr_time_fmt(char dest[], size_t size, int64_t secs);
+int     cstr_cmp_vers(const char a[], const char b[]);
+char   *cstr_case_str(const char h[], const char n[]);
+int     cstr_is_empty(const char cstr[]);
+char   *cstr_trim_left(char cstr[]);
+size_t  cstr_trim_right_len(const char cstr[], size_t len);
 
 
 /*
@@ -65,6 +68,17 @@ int  array_ptr_append(ArrayPtr *a, void *item);
  * Stream
  */
 void stream_in_flush(int fd);
+
+
+/*
+ * SpaceTokenizer
+ */
+typedef struct space_tokenizer {
+	const char *value;
+	unsigned    len;
+} SpaceTokenizer;
+
+const char *space_tokenizer_next(SpaceTokenizer *s, const char raw[]);
 
 
 /*
