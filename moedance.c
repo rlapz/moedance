@@ -66,8 +66,6 @@ static int  _handle_command_sleep(Moedance *m, Cmd *cmd);
 static int  _handle_command_repeat(Moedance *m, Cmd *cmd);
 
 static void _player_play(Moedance *m);
-static void _player_play_repeat_one(Moedance *m);
-static void _player_play_repeat_all(Moedance *m);
 static void _player_stop(Moedance *m);
 static void _player_toggle(Moedance *m);
 static void _player_next(Moedance *m);
@@ -337,10 +335,9 @@ _event_kbd_handler(Moedance *m, int fd)
 		}
 
 		// TODO: handle UTF-8
-		if (is_ascii(buffer[0]) == 0)
-			return;
+		if (is_ascii(buffer[0]))
+			tui_playlist_find_query(&m->tui, buffer, (int)rd);
 
-		tui_playlist_find_query(&m->tui, buffer, (int)rd);
 		return;
 	}
 
@@ -349,26 +346,24 @@ _event_kbd_handler(Moedance *m, int fd)
 		case KBD_Q:
 		case KBD_ESCAPE:
 			_tui_playlist_find_end(m);
-			break;
+			return;
 		case KBD_N:
 			tui_playlist_find_next(&m->tui);
-			break;
+			return;
 		case KBD_P:
 			tui_playlist_find_prev(&m->tui);
-			break;
-		//case KBD_ENTER:
-		//	_player_play(m);
-		//	break;
+			return;
+		case KBD_COLON:
+			return;
 		case KBD_SLASH:
-			SET(m->flags, _FLAG_FINDING_QUERY);
 			UNSET(m->flags, _FLAG_FINDING_FIND);
 			tui_playlist_find_query_clear(&m->tui);
-			tui_show_cursor(&m->tui, 1);
-			break;
+			/* FALLTHROUGH */
+		default:
+			goto out0;
 		}
-
-		return;
 	}
+
 
 	if (ISSET(m->flags, _FLAG_COMMAND)) {
 		switch (kbd) {
@@ -383,10 +378,9 @@ _event_kbd_handler(Moedance *m, int fd)
 			return;
 		}
 
-		if (is_ascii(buffer[0]) == 0)
-			return;
+		if (is_ascii(buffer[0]))
+			tui_command_query(&m->tui, buffer, (int)rd);
 
-		tui_command_query(&m->tui, buffer, (int)rd);
 		return;
 	}
 
@@ -401,6 +395,7 @@ _event_kbd_handler(Moedance *m, int fd)
 		return;
 	}
 
+out0:
 	switch (kbd) {
 	case KBD_ARROW_UP: tui_playlist_cursor_up(&m->tui); break;
 	case KBD_ARROW_DOWN: tui_playlist_cursor_down(&m->tui); break;
@@ -440,15 +435,8 @@ _event_timerfd_handler(Moedance *m, int fd)
 	}
 
 	if (ISSET(m->flags, _FLAG_STARTED)) {
-		if (player_item_is_stopped(&m->player)) {
-			tui_playlist_stop(&m->tui);
-			if (ISSET(m->flags, _FLAG_REPEAT_ONE))
-				_player_play_repeat_one(m);
-			else if (ISSET(m->flags, _FLAG_REPEAT_ALL))
-				_player_play_repeat_all(m);
-			else
-				_player_next(m);
-		}
+		if (player_item_is_stopped(&m->player))
+			_player_next(m);
 
 		tui_set_duration(&m->tui, player_item_get_time(&m->player));
 	}
@@ -647,14 +635,14 @@ _handle_command_sleep(Moedance *m, Cmd *cmd)
 static int
 _handle_command_repeat(Moedance *m, Cmd *cmd)
 {
-	if (cmd->args_len == 0) {
+	const SpaceTokenizer *const st = &cmd->args[0];
+	if ((cmd->args_len == 0) || (strcmp(st->value, "one") == 0)) {
 		UNSET(m->flags, _FLAG_REPEAT_ALL);
 		SET(m->flags, _FLAG_REPEAT_ONE);
 		tui_set_repeat(&m->tui, TUI_REPEAT_TYPE_ONE);
 		return 0;
 	}
 
-	const SpaceTokenizer *const st = &cmd->args[0];
 	if (strcmp(st->value, "all") == 0) {
 		UNSET(m->flags, _FLAG_REPEAT_ONE);
 		SET(m->flags, _FLAG_REPEAT_ALL);
@@ -677,42 +665,6 @@ static void
 _player_play(Moedance *m)
 {
 	const PlaylistItem *const item = tui_playlist_play(&m->tui);
-	if (item == NULL) {
-		_player_stop(m);
-		return;
-	}
-
-	if (player_item_play(&m->player, item->file_path) < 0) {
-		_player_error(m);
-		return;
-	}
-
-	SET(m->flags, _FLAG_STARTED);
-}
-
-
-static void
-_player_play_repeat_one(Moedance *m)
-{
-	const PlaylistItem *const item = tui_playlist_play_repeat_one(&m->tui);
-	if (item == NULL) {
-		_player_stop(m);
-		return;
-	}
-
-	if (player_item_play(&m->player, item->file_path) < 0) {
-		_player_error(m);
-		return;
-	}
-
-	SET(m->flags, _FLAG_STARTED);
-}
-
-
-static void
-_player_play_repeat_all(Moedance *m)
-{
-	const PlaylistItem *item = tui_playlist_play_repeat_all(&m->tui);
 	if (item == NULL) {
 		_player_stop(m);
 		return;

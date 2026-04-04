@@ -69,6 +69,7 @@ static void _set_header(Tui *t);
 static void _set_body(Tui *t);
 static void _set_footer(Tui *t);
 static int  _get_playlist_relative_len(const Tui *t);
+static int  _playlist_check_items(Tui *t);
 static void _playlist_cursor(Tui *t, int step, int is_scroll);
 static void _playlist_cursor_at(Tui *t, int idx);
 
@@ -111,7 +112,7 @@ tui_init(Tui *t, const char root_dir[])
 	t->playlist.repeat = TUI_REPEAT_TYPE_NONE;
 	t->playlist.top = 0;
 	t->playlist.curr = 0;
-	t->playlist.item_active = -1;
+	t->playlist.item_active = 0;
 	t->playlist.item_selected = 0;
 	t->playlist.item_duration = 0;
 	t->playlist.items = NULL;
@@ -242,12 +243,8 @@ tui_set_playlist(Tui *t, const PlaylistItem *items[], int len)
 	if ((items == NULL) || (len <= 0)) {
 		len = 0;
 		items = NULL;
-		goto out0;
 	}
 
-	t->playlist.item_active = 0;
-
-out0:
 	t->playlist.items = items;
 	t->playlist.items_len = len;
 	tui_draw(t);
@@ -388,12 +385,8 @@ tui_playlist_bottom(Tui *t)
 void
 tui_playlist_curr(Tui *t)
 {
-	const int idx = t->playlist.item_active;
-	if (idx < 0)
-		return;
-
 	_draw_begin(t);
-	_playlist_cursor_at(t, idx);
+	_playlist_cursor_at(t, t->playlist.item_active);
 	_draw_end(t);
 }
 
@@ -441,32 +434,23 @@ tui_playlist_find_next(Tui *t)
 	TuiPlaylist *const p = &t->playlist;
 	const char *const query = t->input_buffer.cstr;
 
-	int next = t->playlist.found;
+	const int next = t->playlist.found;
 	if (next >= t->playlist.items_len)
 		return;
 
-	next++;
-	int idx = -1;
-	for (int i = next; i < p->items_len; i++) {
+	for (int i = (next + 1); i < p->items_len; i++) {
 		if (_playlist_cmp(p->items[i], query)) {
-			idx = i;
-			break;
+			p->found = i;
+			goto out0;
 		}
 	}
 
-	if (idx < 0) {
-		if (p->found < 0)
-			p->find_state = _FIND_STATE_NOT_FOUND;
-		else
-			p->find_state = _FIND_STATE_END;
+	p->find_state = (p->found < 0)? _FIND_STATE_NOT_FOUND : _FIND_STATE_END;
+	p->found = next;
 
-		p->found = next - 1;
-	} else {
-		p->found = idx;
-	}
-
+out0:
 	_draw_begin(t);
-	_playlist_cursor_at(t, idx);
+	_playlist_cursor_at(t, p->found);
 	_set_footer(t);
 	_draw_end(t);
 }
@@ -478,28 +462,23 @@ tui_playlist_find_prev(Tui *t)
 	TuiPlaylist *const p = &t->playlist;
 	const char *const query = t->input_buffer.cstr;
 
-	int prev = t->playlist.found;
+	const int prev = t->playlist.found;
 	if (prev <= 0)
 		return;
 
-	prev--;
-	int idx = -1;
-	for (int i = prev; i >= 0; i--) {
+	for (int i = (prev - 1); i >= 0; i--) {
 		if (_playlist_cmp(p->items[i], query)) {
-			idx = i;
-			break;
+			p->find_state = _FIND_STATE_FOUND;
+			p->found = i;
+			goto out0;
 		}
 	}
 
-	if (idx < 0) {
-		p->found = prev + 1;
-	} else {
-		p->find_state = _FIND_STATE_FOUND;
-		p->found = idx;
-	}
+	p->found = prev;
 
+out0:
 	_draw_begin(t);
-	_playlist_cursor_at(t, idx);
+	_playlist_cursor_at(t, p->found);
 	_set_footer(t);
 	_draw_end(t);
 }
@@ -522,12 +501,8 @@ tui_playlist_find_end(Tui *t)
 const PlaylistItem *
 tui_playlist_play(Tui *t)
 {
-	const PlaylistItem *ret;
-	const int idx = t->playlist.item_active;
-	if ((idx < 0) || (t->playlist.items_len <= 0)) {
-		t->playlist.state = _PLAYER_STATE_STOPPED;
-		ret = NULL;
-	} else {
+	const PlaylistItem *ret = NULL;
+	if (_playlist_check_items(t)) {
 		const int sel_idx = t->playlist.curr + t->playlist.top;
 		t->playlist.item_active = sel_idx;
 		t->playlist.item_duration = 0;
@@ -544,62 +519,11 @@ tui_playlist_play(Tui *t)
 
 
 const PlaylistItem *
-tui_playlist_play_repeat_one(Tui *t)
-{
-	const PlaylistItem *ret;
-	const int idx = t->playlist.item_active;
-	if ((idx < 0) || (t->playlist.items_len <= 0)) {
-		t->playlist.state = _PLAYER_STATE_STOPPED;
-		ret = NULL;
-	} else {
-		t->playlist.item_duration = 0;
-		t->playlist.state = _PLAYER_STATE_PLAYING;
-		ret = t->playlist.items[idx];
-	}
-
-	_draw_begin(t);
-	_set_body(t);
-	_set_footer(t);
-	_draw_end(t);
-	return ret;
-}
-
-
-const PlaylistItem *
-tui_playlist_play_repeat_all(Tui *t)
-{
-	const PlaylistItem *ret = tui_playlist_next(t);
-	if (ret != NULL)
-		return ret;
-	
-	const int idx = t->playlist.item_active;
-	if ((idx < 0) || (t->playlist.items_len <= 0)) {
-		t->playlist.state = _PLAYER_STATE_STOPPED;
-		ret = NULL;
-	} else {
-		t->playlist.item_active = 0;
-		t->playlist.item_duration = 0;
-		t->playlist.state = _PLAYER_STATE_PLAYING;
-		ret = t->playlist.items[0];
-	}
-
-	_draw_begin(t);
-	_set_body(t);
-	_set_footer(t);
-	_draw_end(t);
-	return ret;
-}
-
-
-const PlaylistItem *
 tui_playlist_stop(Tui *t)
 {
-	const PlaylistItem *ret;
+	const PlaylistItem *ret = NULL;
 	const int idx = t->playlist.item_active;
-	if ((idx < 0) || (t->playlist.items_len <= 0)) {
-		t->playlist.state = _PLAYER_STATE_STOPPED;
-		ret = NULL;
-	} else {
+	if (_playlist_check_items(t)) {
 		t->playlist.state = _PLAYER_STATE_STOPPED;
 		t->playlist.item_duration = 0;
 		ret = t->playlist.items[idx];
@@ -615,28 +539,26 @@ tui_playlist_stop(Tui *t)
 const PlaylistItem *
 tui_playlist_toggle(Tui *t)
 {
-	const PlaylistItem *ret;
-	const int idx = t->playlist.item_active;
-	if ((idx < 0) || (t->playlist.items_len <= 0)) {
-		t->playlist.state = _PLAYER_STATE_STOPPED;
-		ret = NULL;
-	} else {
-		switch (t->playlist.state) {
-		case _PLAYER_STATE_PAUSED:
-		case _PLAYER_STATE_STOPPED:
-			t->playlist.state = _PLAYER_STATE_PLAYING;
-			break;
-		case _PLAYER_STATE_PLAYING:
-			t->playlist.state = _PLAYER_STATE_PAUSED;
-			break;
-		default:
-			t->playlist.state = _PLAYER_STATE_STOPPED;
-			break;
-		}
+	const PlaylistItem *ret = NULL;
+	if (_playlist_check_items(t) == 0)
+		goto out0;
 
-		ret = t->playlist.items[idx];
+	switch (t->playlist.state) {
+	case _PLAYER_STATE_PAUSED:
+	case _PLAYER_STATE_STOPPED:
+		t->playlist.state = _PLAYER_STATE_PLAYING;
+		break;
+	case _PLAYER_STATE_PLAYING:
+		t->playlist.state = _PLAYER_STATE_PAUSED;
+		break;
+	default:
+		t->playlist.state = _PLAYER_STATE_STOPPED;
+		break;
 	}
 
+	ret = t->playlist.items[t->playlist.item_active];
+
+out0:
 	_draw_begin(t);
 	_set_footer(t);
 	_draw_end(t);
@@ -647,18 +569,34 @@ tui_playlist_toggle(Tui *t)
 const PlaylistItem *
 tui_playlist_next(Tui *t)
 {
-	const PlaylistItem *ret;
-	const int idx = t->playlist.item_active;
+	const PlaylistItem *ret = NULL;
+	if (_playlist_check_items(t) == 0)
+		goto out0;
+
 	const int len = t->playlist.items_len;
-	if ((idx < 0) || ((idx + 1) >= len) || (len <= 0)) {
-		t->playlist.state = _PLAYER_STATE_STOPPED;
-		ret = NULL;
-	} else {
-		t->playlist.state = _PLAYER_STATE_PLAYING;
-		t->playlist.item_active = idx + 1;
-		ret = t->playlist.items[idx + 1];
+	int idx = t->playlist.item_active;
+	switch (t->playlist.repeat) {
+	case TUI_REPEAT_TYPE_ONE:
+		break;
+	case TUI_REPEAT_TYPE_ALL:
+		idx = ((++idx) >= len)? 0 : idx;
+		break;
+	case TUI_REPEAT_TYPE_NONE:
+		idx++;
+		if (idx >= len) {
+			t->playlist.state = _PLAYER_STATE_STOPPED;
+			goto out0;
+		}
+
+		break;
 	}
 
+	t->playlist.state = _PLAYER_STATE_PLAYING;
+	t->playlist.item_active = idx;
+	t->playlist.item_duration = 0;
+	ret = t->playlist.items[idx];
+
+out0:
 	_draw_begin(t);
 	_set_body(t);
 	_set_footer(t);
@@ -670,17 +608,16 @@ tui_playlist_next(Tui *t)
 const PlaylistItem *
 tui_playlist_prev(Tui *t)
 {
-	const PlaylistItem *ret;
-	const int idx = t->playlist.item_active;
-	if (((idx - 1) < 0) || (t->playlist.items_len <= 0)) {
-		t->playlist.state = _PLAYER_STATE_STOPPED;
-		ret = NULL;
-	} else {
-		t->playlist.state = _PLAYER_STATE_PLAYING;
-		t->playlist.item_active = idx - 1;
-		ret = t->playlist.items[idx - 1];
-	}
+	const PlaylistItem *ret = NULL;
+	const int idx = t->playlist.item_active - 1;
+	if ((_playlist_check_items(t) == 0) || (idx < 0))
+		goto out0;
 
+	t->playlist.state = _PLAYER_STATE_PLAYING;
+	t->playlist.item_active = idx;
+	ret = t->playlist.items[idx];
+
+out0:
 	_draw_begin(t);
 	_set_body(t);
 	_set_footer(t);
@@ -1013,6 +950,18 @@ static inline int
 _get_playlist_relative_len(const Tui *t)
 {
 	return t->footer_pos - 3;
+}
+
+
+static int
+_playlist_check_items(Tui *t)
+{
+	if (t->playlist.items_len <= 0) {
+		t->playlist.state = _PLAYER_STATE_STOPPED;
+		return 0;
+	}
+
+	return 1;
 }
 
 
