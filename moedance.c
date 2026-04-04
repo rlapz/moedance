@@ -694,7 +694,7 @@ _player_play(Moedance *m)
 static void
 _player_play_repeat_one(Moedance *m)
 {
-	const PlaylistItem *const item = tui_playlist_play_repeat(&m->tui);
+	const PlaylistItem *const item = tui_playlist_play_repeat_one(&m->tui);
 	if (item == NULL) {
 		_player_stop(m);
 		return;
@@ -712,13 +712,10 @@ _player_play_repeat_one(Moedance *m)
 static void
 _player_play_repeat_all(Moedance *m)
 {
-	const PlaylistItem *item = tui_playlist_next(&m->tui);
+	const PlaylistItem *item = tui_playlist_play_repeat_all(&m->tui);
 	if (item == NULL) {
-		item = tui_playlist_play_top(&m->tui);
-		if (item == NULL) {
-			_player_stop(m);
-			return;
-		}
+		_player_stop(m);
+		return;
 	}
 
 	if (player_item_play(&m->player, item->file_path) < 0) {

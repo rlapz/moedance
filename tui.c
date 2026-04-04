@@ -544,7 +544,7 @@ tui_playlist_play(Tui *t)
 
 
 const PlaylistItem *
-tui_playlist_play_top(Tui *t)
+tui_playlist_play_repeat_one(Tui *t)
 {
 	const PlaylistItem *ret;
 	const int idx = t->playlist.item_active;
@@ -552,10 +552,9 @@ tui_playlist_play_top(Tui *t)
 		t->playlist.state = _PLAYER_STATE_STOPPED;
 		ret = NULL;
 	} else {
-		t->playlist.item_active = 0;
 		t->playlist.item_duration = 0;
 		t->playlist.state = _PLAYER_STATE_PLAYING;
-		ret = t->playlist.items[0];
+		ret = t->playlist.items[idx];
 	}
 
 	_draw_begin(t);
@@ -567,17 +566,21 @@ tui_playlist_play_top(Tui *t)
 
 
 const PlaylistItem *
-tui_playlist_play_repeat(Tui *t)
+tui_playlist_play_repeat_all(Tui *t)
 {
-	const PlaylistItem *ret;
+	const PlaylistItem *ret = tui_playlist_next(t);
+	if (ret != NULL)
+		return ret;
+	
 	const int idx = t->playlist.item_active;
 	if ((idx < 0) || (t->playlist.items_len <= 0)) {
 		t->playlist.state = _PLAYER_STATE_STOPPED;
 		ret = NULL;
 	} else {
+		t->playlist.item_active = 0;
 		t->playlist.item_duration = 0;
 		t->playlist.state = _PLAYER_STATE_PLAYING;
-		ret = t->playlist.items[idx];
+		ret = t->playlist.items[0];
 	}
 
 	_draw_begin(t);

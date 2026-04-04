@@ -85,8 +85,8 @@ void tui_playlist_find_prev(Tui *t);
 void tui_playlist_find_end(Tui *t);
 
 const PlaylistItem *tui_playlist_play(Tui *t);
-const PlaylistItem *tui_playlist_play_top(Tui *t);
-const PlaylistItem *tui_playlist_play_repeat(Tui *t);
+const PlaylistItem *tui_playlist_play_repeat_one(Tui *t);
+const PlaylistItem *tui_playlist_play_repeat_all(Tui *t);
 const PlaylistItem *tui_playlist_stop(Tui *t);
 const PlaylistItem *tui_playlist_toggle(Tui *t);
 const PlaylistItem *tui_playlist_next(Tui *t);
