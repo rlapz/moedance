@@ -322,7 +322,7 @@ _event_kbd_handler(Moedance *m, int fd)
 		case KBD_BACKSPACE:
 			// TODO: handle UTF-8
 			tui_playlist_find_query(&m->tui, buffer, -1);
-			break;
+			return;
 		case KBD_ESCAPE:
 			_tui_playlist_find_end(m);
 			return;
@@ -369,10 +369,10 @@ _event_kbd_handler(Moedance *m, int fd)
 		switch (kbd) {
 		case KBD_BACKSPACE:
 			tui_command_query(&m->tui, buffer, -1);
-			break;
+			return;
 		case KBD_ESCAPE:
 			_tui_command_end(m, 1);
-			break;
+			return;
 		case KBD_ENTER:
 			_handle_command(m);
 			return;
