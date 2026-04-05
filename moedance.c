@@ -633,23 +633,19 @@ _handle_command_sleep(Moedance *m, Cmd *cmd)
 static int
 _handle_command_repeat(Moedance *m, Cmd *cmd)
 {
-	const SpaceTokenizer *const st = &cmd->args[0];
-	if ((cmd->args_len == 0) || (strcmp(st->value, "one") == 0)) {
-		tui_set_repeat(&m->tui, TUI_REPEAT_TYPE_ONE);
-		return 0;
-	}
+	int type;
+	const char *const arg0 = cmd->args[0].value;
+	if ((cmd->args_len == 0) || (strcmp(arg0, "one") == 0))
+		type = TUI_REPEAT_TYPE_ONE;
+	else if (strcmp(arg0, "all") == 0)
+		type = TUI_REPEAT_TYPE_ALL;
+	else if (strcmp(arg0, "none") == 0)
+		type = TUI_REPEAT_TYPE_NONE;
+	else
+		return -2;
 
-	if (strcmp(st->value, "all") == 0) {
-		tui_set_repeat(&m->tui, TUI_REPEAT_TYPE_ALL);
-		return 0;
-	}
-
-	if (strcmp(st->value, "none") == 0) {
-		tui_set_repeat(&m->tui, TUI_REPEAT_TYPE_NONE);
-		return 0;
-	}
-
-	return -2;
+	tui_set_repeat(&m->tui, type);
+	return 0;
 }
 
 
