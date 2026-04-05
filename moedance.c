@@ -31,8 +31,6 @@ enum {
 	_FLAG_FINDING_QUERY = (1 << 3),
 	_FLAG_FINDING_FIND  = (1 << 4),
 	_FLAG_COMMAND       = (1 << 5),
-	_FLAG_REPEAT_ONE    = (1 << 6),
-	_FLAG_REPEAT_ALL    = (1 << 7),
 };
 
 enum {
@@ -637,22 +635,16 @@ _handle_command_repeat(Moedance *m, Cmd *cmd)
 {
 	const SpaceTokenizer *const st = &cmd->args[0];
 	if ((cmd->args_len == 0) || (strcmp(st->value, "one") == 0)) {
-		UNSET(m->flags, _FLAG_REPEAT_ALL);
-		SET(m->flags, _FLAG_REPEAT_ONE);
 		tui_set_repeat(&m->tui, TUI_REPEAT_TYPE_ONE);
 		return 0;
 	}
 
 	if (strcmp(st->value, "all") == 0) {
-		UNSET(m->flags, _FLAG_REPEAT_ONE);
-		SET(m->flags, _FLAG_REPEAT_ALL);
 		tui_set_repeat(&m->tui, TUI_REPEAT_TYPE_ALL);
 		return 0;
 	}
 
 	if (strcmp(st->value, "none") == 0) {
-		UNSET(m->flags, _FLAG_REPEAT_ONE);
-		UNSET(m->flags, _FLAG_REPEAT_ALL);
 		tui_set_repeat(&m->tui, TUI_REPEAT_TYPE_NONE);
 		return 0;
 	}
