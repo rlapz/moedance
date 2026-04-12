@@ -19,18 +19,49 @@
 
 ### Keyboard shortcuts:
 ```
-1. Up:                 k           [OR]  <ARROW UP>
-2. Down:               j           [OR]  <ARROW DOWN>
-3. Scroll up:          <CTRL> + u  [OR]  <PAGE UP>
-4. Scroll down:        <CTRL> + d  [OR]  <PAGE DOWN>
-5. Go to top:          gg          [OR]  <HOME>
-6. Go to bottom:       G           [OR]  <END>
-7. Next:               n
-8. Prev:               p
-9. Play:               <ENTER>
-10. Toggle Play/Pause: <SPACE>
-11. Stop:              s
-12. Quit:              q
+1. Up:                      k           [OR]  <ARROW UP>
+2. Down:                    j           [OR]  <ARROW DOWN>
+3. Scroll up:               <CTRL> + u  [OR]  <PAGE UP>
+4. Scroll down:             <CTRL> + d  [OR]  <PAGE DOWN>
+5. Go to top:               gg          [OR]  <HOME>
+6. Go to bottom:            G           [OR]  <END>
+7. Next:                    n
+8. Prev:                    p
+9. Play:                    <ENTER>
+10. Toggle Play/Pause:      <SPACE>
+11. Stop:                   s
+12. Quit:                   q
+13. Find:                   /
+    -> Submit               <ENTER>
+    -> Next                 n
+    -> Prev                 p
+    -> Quit finding mode:   q           [OR]  <ESC>
+
+14. Command Mode:           :
+    -> Submit               <ENTER>
+    -> Quit command mode:   q           [OR]  <ESC>
+```
+
+
+### Command List:
+```
+1. repeat <ARGS>
+   ARGS:
+     -> none
+     -> one
+     -> all
+   Example:
+     -> repeat one
+
+2. sleep  <NUMBER><TIME FORMAT>
+   TIME FORMAT:
+     -> seconds:   s
+     -> minutes:   m
+     -> hours:     h
+   Example:
+     -> sleep 1m
+     -> sleep 10s
+     -> sleep 1h
 ```
 
 
